@@ -80,3 +80,10 @@ surefire-reports/
 .env
 .env.*
 !.env.example
+
+
+###Angular###
+
+node_modules/
+.angular/
+dist/
