@@ -1,4 +1,4 @@
-import { API_URL, authHeaders, sesionActiva, checkRes } from "../recursos/modulos.js";
+import { API_URL, authHeaders, sesionActiva, checkRes, resumenDiasApertura, listaDiasAperturaHTML } from "../recursos/modulos.js";
 
 const usuariosBody = document.getElementById("usuariosBody");
 const sucursalesBody = document.getElementById("sucursalesBody");
@@ -221,6 +221,10 @@ async function abrirModalSucursal(sucursalId) {
                 <div><small class="detail-label">Teléfono</small><div class="detail-value">${s.telefono ?? "-"}</div></div>
                 <div><small class="detail-label">Fecha de creación</small><div class="detail-value">${s.fechaCreacion ?? "-"}</div></div>
                 <div><small class="detail-label">Horario</small><div class="detail-value">${s.horaApertura ?? "-"} — ${s.horaCierre ?? "-"}</div></div>
+                <div class="col-full"><small class="detail-label">Días de apertura</small><div class="detail-value detalle-value--dias">
+                    <span class="detalle-sub">${resumenDiasApertura(s.diasApertura)}</span>
+                    <ul class="dias-lista">${listaDiasAperturaHTML(s.diasApertura)}</ul>
+                </div></div>
                 <div><small class="detail-label">Puntuación</small><div class="detail-value">${s.puntuacion ? "🐝".repeat(Math.round(s.puntuacion)) : "-"}</div></div>
                 <div><small class="detail-label">Empleador</small><div class="detail-value">${s.empleador ? s.empleador.nombre + " " + s.empleador.apellido : "-"}</div></div>
             </div>

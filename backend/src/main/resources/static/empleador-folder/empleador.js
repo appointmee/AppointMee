@@ -1,4 +1,14 @@
-import { API_URL, authHeaders, sesionActiva, checkRes, formatearFechaLocal } from "../recursos/modulos.js";
+import {
+    API_URL,
+    authHeaders,
+    sesionActiva,
+    checkRes,
+    formatearFechaLocal,
+    DIAS_SEMANA,
+    checksDiasAperturaHTML,
+    leerDiasApertura,
+    marcarTodosLosDias
+} from "../recursos/modulos.js";
 
 const user = await sesionActiva();
 
@@ -37,6 +47,16 @@ function crearModal(id) {
     });
     document.body.appendChild(div);
     return div;
+}
+
+// Enciende los botones "Todos" / "Ninguno" de los checks de dias de apertura.
+function activarDiasApertura(prefijo, contenedor) {
+    contenedor.querySelectorAll("[data-marcar-todos]").forEach(btn => {
+        btn.addEventListener("click", () => marcarTodosLosDias(prefijo, true));
+    });
+    contenedor.querySelectorAll("[data-marcar-ninguno]").forEach(btn => {
+        btn.addEventListener("click", () => marcarTodosLosDias(prefijo, false));
+    });
 }
 
 async function cargarMe() {
@@ -487,6 +507,17 @@ async function abrirModalModificarSucursal(sucursalId) {
             <div class="input-group">
                 <input type="time" class="form-control" id="mod-suc-horaCierre" value="${suc.horaCierre}">
             </div>
+            <p>Días de apertura</p>
+            <div class="dias-apertura">
+                <div class="dias-apertura__acciones">
+                    <button type="button" class="btn-ghost btn-ghost--mini" data-no-cooldown data-marcar-todos="mod-suc">Todos</button>
+                    <button type="button" class="btn-ghost btn-ghost--mini" data-no-cooldown data-marcar-ninguno="mod-suc">Ninguno</button>
+                </div>
+                <div class="dias-apertura__checks">
+                    ${checksDiasAperturaHTML("mod-suc", suc.diasApertura)}
+                </div>
+                <p class="dias-apertura__ayuda">Desmarcá los días que la sucursal no abre.</p>
+            </div>
             <p>URL foto</p>
             <div class="input-group">
                 <input type="url" class="form-control" id="mod-suc-fotoUrl" value="${suc.fotoPerfil ?? ""}">
@@ -529,7 +560,16 @@ async function abrirModalModificarSucursal(sucursalId) {
         if (container) container.innerHTML = '<div style="color:var(--red);font-size:12px;">Error al cargar empleados</div>';
     }
 
+    activarDiasApertura("mod-suc", div);
+
     document.getElementById("btn-guardar-suc").addEventListener("click", async () => {
+        const diasApertura = leerDiasApertura("mod-suc");
+
+        if (!diasApertura.length) {
+            alert("Tenés que marcar al menos un día de apertura");
+            return;
+        }
+
         const body = {
             nombre: document.getElementById("mod-suc-nombre").value || undefined,
             direccion: document.getElementById("mod-suc-direccion").value || undefined,
@@ -537,6 +577,7 @@ async function abrirModalModificarSucursal(sucursalId) {
             descripcion: document.getElementById("mod-suc-descripcion").value || undefined,
             horaApertura: document.getElementById("mod-suc-horaApertura").value || undefined,
             horaCierre: document.getElementById("mod-suc-horaCierre").value || undefined,
+            diasApertura,
             fotoUrl: document.getElementById("mod-suc-fotoUrl").value || undefined,
         };
         try {
@@ -667,6 +708,18 @@ function abrirModalAgregarSucursal() {
                 <input type="time" class="form-control" id="add-suc-horaCierre" required>
             </div>
 
+            <p>Días de apertura</p>
+            <div class="dias-apertura">
+                <div class="dias-apertura__acciones">
+                    <button type="button" class="btn-ghost btn-ghost--mini" data-no-cooldown data-marcar-todos="add-suc">Todos</button>
+                    <button type="button" class="btn-ghost btn-ghost--mini" data-no-cooldown data-marcar-ninguno="add-suc">Ninguno</button>
+                </div>
+                <div class="dias-apertura__checks">
+                    ${checksDiasAperturaHTML("add-suc", DIAS_SEMANA.map(d => d.valor))}
+                </div>
+                <p class="dias-apertura__ayuda">Desmarcá los días que la sucursal no abre.</p>
+            </div>
+
             <p>URL foto de perfil</p>
             <div class="input-group">
                 <input type="url" class="form-control" placeholder="https://..." id="add-suc-fotoUrl" required>
@@ -681,6 +734,8 @@ function abrirModalAgregarSucursal() {
 
     cargarCategoriasSucursal();
 
+    activarDiasApertura("add-suc", div);
+
     document.getElementById("btn-crear-suc").addEventListener("click", async (e) => {
         e.preventDefault();
 
@@ -692,8 +747,14 @@ function abrirModalAgregarSucursal() {
         const horaApertura = document.getElementById("add-suc-horaApertura").value;
         const horaCierre = document.getElementById("add-suc-horaCierre").value;
         const fotoUrl = document.getElementById("add-suc-fotoUrl").value;
+        const diasApertura = leerDiasApertura("add-suc");
 
-        await postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, fotoUrl, div);
+        if (!diasApertura.length) {
+            alert("Tenés que marcar al menos un día de apertura");
+            return;
+        }
+
+        await postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, diasApertura, fotoUrl, div);
     });
 }
 
@@ -720,7 +781,7 @@ async function cargarCategoriasSucursal() {
     }
 }
 
-async function postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, fotoUrl, modalDiv) {
+async function postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, diasApertura, fotoUrl, modalDiv) {
     const datos = {
         nombre,
         direccion,
@@ -729,6 +790,7 @@ async function postSucursal(nombre, direccion, telefono, descripcion, categoriaI
         categoriaId,
         horaApertura,
         horaCierre,
+        diasApertura,
         fotoUrl
     };
 

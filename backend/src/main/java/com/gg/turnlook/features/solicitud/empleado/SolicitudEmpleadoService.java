@@ -3,6 +3,7 @@ package com.gg.turnlook.features.solicitud.empleado;
 import com.gg.turnlook.common.exception.ConflictException;
 import com.gg.turnlook.common.exception.ForbiddenException;
 import com.gg.turnlook.common.exception.NotFoundException;
+import com.gg.turnlook.common.util.DiasSemanaUtil;
 import com.gg.turnlook.features.resenia.ReseniaService;
 import com.gg.turnlook.features.solicitud.EstadoSolicitud;
 import com.gg.turnlook.features.solicitud.empleado.dto.SolicitudEmpleadoMiniPropiaDTO;
@@ -114,7 +115,8 @@ public class SolicitudEmpleadoService {
                 s.getId(), s.getNombre(), s.getCategoria().getCategoria().name(),
                 s.getFotoPerfil().getFotoValida(),
                 reseniaService.getPuntuacionPromedioSucursal(s.getId()),
-                reseniaService.getPuntuacionesTotalesSucursal(s.getId()));
+                reseniaService.getPuntuacionesTotalesSucursal(s.getId()),
+                DiasSemanaUtil.aNombres(s.getDiasApertura()));
 
         solicitudDTO.setSucursal(sucursal);
 
