@@ -44,7 +44,7 @@ public class UsuarioService {
     /// METODOS
 
 
-    public void recuperarCuenta(LoginDTO login) {
+    public void activarCuenta(LoginDTO login) {
 
         Usuario usuario = usRepo.findByEmailAndActivoFalse(login.getEmail())
                 .orElseThrow(() -> new UnauthorizedException("Credenciales incorrectas"));
