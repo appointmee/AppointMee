@@ -81,6 +81,10 @@ public class TurnoService {
             throw new BadRequestException("El empleado elegido no pertenece a esa sucursal");
         }
 
+        if (!servicio.getSucursal().abreElDia(turno.getFechaHora().toLocalDate().getDayOfWeek())) {
+            throw new BadRequestException("La sucursal no abre ese dia");
+        }
+
         LocalDate dia = turno.getFechaHora().toLocalDate();
         List<Turno> turnosDia = turnoRepo.findByEmpleadoAndFechaHoraBetweenAndEstadoNot(
                 empleado, dia.atStartOfDay(), dia.atTime(LocalTime.MAX), EstadoTurno.CANCELADO);
@@ -115,6 +119,12 @@ public class TurnoService {
         Map<LocalDate, List<LocalTime>> disponibilidad = new LinkedHashMap<>();
         for (int i = 0; i < 7; i++) {
             LocalDate dia = LocalDate.now().plusDays(i);
+
+            // si la sucursal no abre ese dia no hay horarios disponibles
+            if (!sucursal.abreElDia(dia.getDayOfWeek())) {
+                disponibilidad.put(dia, Collections.emptyList());
+                continue;
+            }
 
             List<Turno> turnosDia = turnosPorDia.getOrDefault(dia, Collections.emptyList());
             List<LocalTime> horariosDisponibles = new ArrayList<>();

@@ -1,10 +1,13 @@
 package com.gg.turnlook.features.sucursal;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.gg.turnlook.common.util.DiasSemanaConverter;
 import com.gg.turnlook.features.imagen.Imagen;
 import com.gg.turnlook.features.sucursal.categoria.Categoria;
 import com.gg.turnlook.features.usuario.Usuario;
 import jakarta.persistence.*;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.HashSet;
@@ -52,6 +55,15 @@ public class Sucursal {
     @Column(name = "hora_cierre", nullable = false)
     private LocalTime horaCierre;
 
+    /// Dias de la semana que abre la sucursal (los que no estan marcados se toman como cerrados).
+    /// Se guardan en una sola columna de texto con los nombres separados por comas.
+    /// Si la columna esta vacia se asume que la sucursal abre todos los dias.
+
+    @Convert(converter = DiasSemanaConverter.class)
+    @Column(name = "dias_apertura", length = 120)
+    @JsonIgnore
+    private Set<DayOfWeek> diasApertura = new HashSet<>();
+
     @Column(nullable = false)
     private boolean activo = true;
 
@@ -86,6 +98,28 @@ public class Sucursal {
     @PrePersist
     public void prePersist() {
         this.fechaCreacion = LocalDate.now();
+    }
+
+
+    /// METODOS
+
+
+    /// Si la sucursal abre ese dia de la semana.
+    /// Si todavia no se cargo ningun dia se asume que abre todos (sucursales viejas).
+
+    public boolean abreElDia(DayOfWeek dia) {
+        return this.diasApertura == null || this.diasApertura.isEmpty()
+                || this.diasApertura.contains(dia);
+    }
+
+
+    /// Reemplaza los dias de apertura por los indicados.
+    /// Se modifica la coleccion en el lugar para que Hibernate detecte el cambio.
+
+    public void setDiasAperturaPorNombre(Set<DayOfWeek> dias) {
+        if (this.diasApertura == null) this.diasApertura = new HashSet<>();
+        this.diasApertura.clear();
+        this.diasApertura.addAll(dias);
     }
 
 

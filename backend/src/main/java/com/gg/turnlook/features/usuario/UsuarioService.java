@@ -1,5 +1,7 @@
 package com.gg.turnlook.features.usuario;
 
+import com.gg.turnlook.common.util.DiasSemanaUtil;
+
 import com.gg.turnlook.auth.dto.LoginDTO;
 import com.gg.turnlook.common.exception.ConflictException;
 import com.gg.turnlook.common.exception.ForbiddenException;
@@ -219,7 +221,8 @@ public class UsuarioService {
                         suc.getCategoria().getCategoria().name(),
                         suc.getFotoPerfil().getFotoValida(),
                         reseniaService.getPuntuacionPromedioSucursal(suc.getId()),
-                        reseniaService.getPuntuacionesTotalesSucursal(suc.getId()))
+                        reseniaService.getPuntuacionesTotalesSucursal(suc.getId()),
+                        DiasSemanaUtil.aNombres(suc.getDiasApertura()))
                 )
                 .toList());
 

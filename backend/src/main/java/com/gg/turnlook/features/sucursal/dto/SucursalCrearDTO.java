@@ -6,7 +6,7 @@ import java.time.LocalTime;
 import lombok.Data;
 import org.hibernate.validator.constraints.URL;
 
-
+import java.util.List;
 
 @Data
 public class SucursalCrearDTO {
@@ -41,6 +41,10 @@ public class SucursalCrearDTO {
     @NotNull(message = "La hora de cierre es obligatoria")
     @JsonFormat(pattern = "HH:mm")
     private LocalTime horaCierre;
+
+    @NotEmpty(message = "Los dias de apertura son obligatorios")
+    @Size(max = 7, message = "No se pueden marcar mas de 7 dias de apertura")
+    private List<String> diasApertura;
 
     @NotBlank(message = "La foto de perfil es obligatoria")
     @URL(message = "La foto de perfil debe ser una URL valida")

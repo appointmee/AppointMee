@@ -70,3 +70,84 @@ export function formatearFechaLocal(isoStr) {
     const date = new Date(+y, +m - 1, +d, +h, +min, +(s || 0));
     return date.toLocaleString("es-AR");
 }
+
+/// Dias de la semana en el orden lunes a domingo (como los devuelve el backend).
+export const DIAS_SEMANA = [
+    { valor: "MONDAY", corto: "LU", etiqueta: "Lunes" },
+    { valor: "TUESDAY", corto: "MA", etiqueta: "Martes" },
+    { valor: "WEDNESDAY", corto: "MI", etiqueta: "Miércoles" },
+    { valor: "THURSDAY", corto: "JU", etiqueta: "Jueves" },
+    { valor: "FRIDAY", corto: "VI", etiqueta: "Viernes" },
+    { valor: "SATURDAY", corto: "SA", etiqueta: "Sábado" },
+    { valor: "SUNDAY", corto: "DO", etiqueta: "Domingo" },
+];
+
+/// Devuelve los dias marcados en el orden lunes a domingo.
+/// Si no vine nada se asumen los 7 (una sucursal sin dias cargados abre todos).
+function normalizarDiasApertura(dias) {
+    const marcados = new Set((Array.isArray(dias) ? dias : []).map(d => String(d).trim().toUpperCase()));
+    if (!marcados.size) return DIAS_SEMANA.map(d => d.valor);
+    return DIAS_SEMANA.filter(d => marcados.has(d.valor)).map(d => d.valor);
+}
+
+/// Resumen legible: "Lunes a Viernes", "Sábado y Domingo" o "Todos los días".
+export function resumenDiasApertura(dias) {
+    const abiertos = normalizarDiasApertura(dias);
+
+    if (abiertos.length === DIAS_SEMANA.length) return "Todos los días";
+    if (!abiertos.length) return "No abre ningún día";
+
+    const indices = abiertos.map(valor => DIAS_SEMANA.findIndex(d => d.valor === valor));
+    const tramos = [];
+
+    indices.forEach((indice, i) => {
+        const ultimo = indices[i - 1];
+        if (ultimo !== undefined && indice === ultimo + 1) {
+            tramos[tramos.length - 1].hasta = indice;
+            return;
+        }
+        tramos.push({ desde: indice, hasta: indice });
+    });
+
+    return tramos.map(({ desde, hasta }) => {
+        if (desde === hasta) return DIAS_SEMANA[desde].etiqueta;
+        if (hasta === desde + 1) return `${DIAS_SEMANA[desde].etiqueta} y ${DIAS_SEMANA[hasta].etiqueta}`;
+        return `${DIAS_SEMANA[desde].etiqueta} a ${DIAS_SEMANA[hasta].etiqueta}`;
+    }).join(", ");
+}
+
+/// HTML con un check por dia. Los no marcados son los dias que la sucursal no abre.
+export function checksDiasAperturaHTML(prefijo, dias) {
+    const marcados = new Set(normalizarDiasApertura(dias));
+
+    return DIAS_SEMANA.map(dia => `
+        <label class="dia-check" for="${prefijo}-dia-${dia.valor}">
+            <input type="checkbox" class="dia-check__input" id="${prefijo}-dia-${dia.valor}"
+                   name="${prefijo}-dias" value="${dia.valor}"${marcados.has(dia.valor) ? " checked" : ""}>
+            <span class="dia-check__corto">${dia.corto}</span>
+            <span class="dia-check__nombre">${dia.etiqueta}</span>
+        </label>`).join("");
+}
+
+/// Devuelve los valores de los dias marcados.
+export function leerDiasApertura(prefijo) {
+    return Array.from(document.querySelectorAll(`input[name="${prefijo}-dias"]:checked`))
+        .map(input => input.value);
+}
+
+/// Marca o desmarca todos los checks de dias (botones "Todos" / "Ninguno").
+export function marcarTodosLosDias(prefijo, marcar) {
+    document.querySelectorAll(`input[name="${prefijo}-dias"]`)
+        .forEach(input => { input.checked = marcar; });
+}
+
+/// HTML con los 7 dias, marcando los que abre la sucursal.
+export function listaDiasAperturaHTML(dias) {
+    const abiertos = new Set(normalizarDiasApertura(dias));
+
+    return DIAS_SEMANA.map(dia => `
+        <li class="dia-chip${abiertos.has(dia.valor) ? "" : " dia-chip--cerrado"}" title="${dia.etiqueta}">
+            <span class="dia-chip__corto">${dia.corto}</span>
+            <span class="dia-chip__nombre">${dia.etiqueta}</span>
+        </li>`).join("");
+}

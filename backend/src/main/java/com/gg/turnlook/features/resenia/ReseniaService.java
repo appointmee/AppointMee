@@ -6,8 +6,8 @@ import com.gg.turnlook.features.turno.Turno;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
-
-
+import java.util.Map;
+import java.util.stream.Collectors;
 
 
 @Service
@@ -67,6 +67,87 @@ public class ReseniaService {
     public Long getPuntuacionesTotalesSucursal(Integer sucursalId) {
 
         return reseniaRepo.puntuacionesTotalesSucursal(sucursalId);
+    }
+
+
+    /// Promedio (ya redondeado) y cantidad de resenias de varias sucursales,
+    /// en una sola query. Las sucursales sin resenias no aparecen en el mapa.
+
+    public Map<Integer, ResumenPuntuacion> getPuntuacionesSucursales(
+            List<Integer> sucursalIds) {
+
+        return aMapa(resumenPuntuacionesPorSucursal(sucursalIds), sucursalIds);
+    }
+
+
+    private List<Object[]> resumenPuntuacionesPorSucursal(List<Integer> ids) {
+
+        if (ids == null || ids.isEmpty()) return List.of();
+
+        return reseniaRepo.resumenPuntuacionesPorSucursal(ids);
+    }
+
+
+    /// Promedio redondeado y total de resenias de una sucursal.
+    /// El promedio va en null cuando la sucursal todavia no tiene resenias.
+
+    public record ResumenPuntuacion(Double promedio, Long cantidad) {
+
+
+        public Integer promedioRedondeado() {
+            return promedio == null ? null : (int) Math.round(promedio);
+        }
+    }
+
+
+    /// Igual que getPuntuacionesSucursales pero para los servicios de una lista.
+
+    public Map<Integer, ResumenPuntuacion> getPuntuacionesServicios(
+            List<Integer> servicioIds) {
+
+        return aMapa(resumenPuntuacionesPorServicio(servicioIds), servicioIds);
+    }
+
+
+    /// Igual que getPuntuacionesSucursales pero para los empleados de una lista.
+
+    public Map<Integer, ResumenPuntuacion> getPuntuacionesEmpleados(
+            List<Integer> empleadoIds) {
+
+        return aMapa(resumenPuntuacionesPorEmpleado(empleadoIds), empleadoIds);
+    }
+
+
+    private List<Object[]> resumenPuntuacionesPorServicio(List<Integer> ids) {
+
+        if (ids == null || ids.isEmpty()) return List.of();
+
+        return reseniaRepo.resumenPuntuacionesPorServicio(ids);
+    }
+
+
+    private List<Object[]> resumenPuntuacionesPorEmpleado(List<Integer> ids) {
+
+        if (ids == null || ids.isEmpty()) return List.of();
+
+        return reseniaRepo.resumenPuntuacionesPorEmpleado(ids);
+    }
+
+
+    private Map<Integer, ResumenPuntuacion> aMapa(List<Object[]> filas,
+                                                 List<Integer> ids) {
+
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+
+        return filas.stream()
+                .collect(Collectors.toMap(
+                        fila -> ((Number) fila[0]).intValue(),
+                        fila -> new ResumenPuntuacion(
+                                ((Number) fila[1]).doubleValue(),
+                                ((Number) fila[2]).longValue()),
+                        (a, b) -> a));
     }
 
 

@@ -20,7 +20,12 @@ Gestor de turnos para Trabajo Practico Final de la Materia Programacion III en l
 
 ## Base de datos
 * PostgreSQL (SupaBase)
-  
+
+El proyecto no usa migraciones automáticas (`spring.jpa.hibernate.ddl-auto=validate`),
+por lo que los scripts de `backend/src/main/resources/db/` hay que correrlos a mano en la base.
+Por ejemplo, `db/sucursal_dias_apertura.sql` agrega la columna con los días de la semana
+que abre cada sucursal (los días que no figuran se toman como cerrados).
+   
 ## Frontend
 
 * HTML5
