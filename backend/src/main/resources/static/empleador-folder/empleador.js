@@ -7,7 +7,8 @@ import {
     DIAS_SEMANA,
     checksDiasAperturaHTML,
     leerDiasApertura,
-    marcarTodosLosDias
+    marcarTodosLosDias,
+    subirImagenCloudinary
 } from "../recursos/modulos.js";
 
 const user = await sesionActiva();
@@ -47,6 +48,42 @@ function crearModal(id) {
     });
     document.body.appendChild(div);
     return div;
+}
+
+function activarSubidaImagen(fileId, urlId, publicIdId, tipo, statusId) {
+    const fileInput = document.getElementById(fileId);
+    const urlInput = document.getElementById(urlId);
+    const publicIdInput = document.getElementById(publicIdId);
+    const status = document.getElementById(statusId);
+    if (!fileInput || !urlInput || !publicIdInput) return;
+
+    let ultimaUrlSubida = null;
+    fileInput.addEventListener("change", async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+
+        fileInput.disabled = true;
+        if (status) status.textContent = "Subiendo imagen…";
+        try {
+            const imagen = await subirImagenCloudinary(file, tipo);
+            urlInput.value = imagen.url;
+            publicIdInput.value = imagen.publicId;
+            ultimaUrlSubida = imagen.url;
+            if (status) status.textContent = "Imagen subida. Se guardará al guardar el formulario.";
+        } catch (error) {
+            if (status) status.textContent = error.message;
+            fileInput.value = "";
+        } finally {
+            fileInput.disabled = false;
+        }
+    });
+
+    urlInput.addEventListener("input", () => {
+        if (ultimaUrlSubida !== null && urlInput.value.trim() !== ultimaUrlSubida) {
+            publicIdInput.value = "";
+            ultimaUrlSubida = null;
+        }
+    });
 }
 
 // Enciende los botones "Todos" / "Ninguno" de los checks de dias de apertura.
@@ -520,8 +557,13 @@ async function abrirModalModificarSucursal(sucursalId) {
             </div>
             <p>URL foto</p>
             <div class="input-group">
+                <input type="file" class="form-control" id="mod-suc-fotoFile" accept="image/jpeg,image/png,image/webp,image/gif">
+            </div>
+            <p id="mod-suc-fotoStatus" style="font-size:12px;color:var(--t3);">También podés elegir una imagen de hasta 5 MB.</p>
+            <div class="input-group">
                 <input type="url" class="form-control" id="mod-suc-fotoUrl" value="${suc.fotoPerfil ?? ""}">
             </div>
+            <input type="hidden" id="mod-suc-fotoPublicId">
             <hr style="border-color:var(--b);margin:20px 0;">
             <p style="font-size:13px;font-weight:600;color:var(--t);margin-bottom:10px;">Empleados</p>
             <div id="empleados-lista-modal" style="color:var(--t3);font-size:12px;">Cargando...</div>
@@ -531,6 +573,8 @@ async function abrirModalModificarSucursal(sucursalId) {
             </div>
         </div>
     `;
+
+    activarSubidaImagen("mod-suc-fotoFile", "mod-suc-fotoUrl", "mod-suc-fotoPublicId", "SUCURSAL", "mod-suc-fotoStatus");
 
     try {
         const res = await fetch(API_URL + `/sucursales/${sucursalId}/empleados`, { headers: authHeaders() });
@@ -579,6 +623,7 @@ async function abrirModalModificarSucursal(sucursalId) {
             horaCierre: document.getElementById("mod-suc-horaCierre").value || undefined,
             diasApertura,
             fotoUrl: document.getElementById("mod-suc-fotoUrl").value || undefined,
+            fotoPublicId: document.getElementById("mod-suc-fotoPublicId").value || undefined,
         };
         try {
             const res = await fetch(API_URL + `/sucursales/modificar/${sucursalId}`, {
@@ -624,14 +669,21 @@ async function abrirModalModificarServicio(servicioId) {
                 </div>
                 <p>URL foto</p>
                 <div class="input-group">
+                    <input type="file" class="form-control" id="mod-serv-fotoFile" accept="image/jpeg,image/png,image/webp,image/gif">
+                </div>
+                <p id="mod-serv-fotoStatus" style="font-size:12px;color:var(--t3);">También podés elegir una imagen de hasta 5 MB.</p>
+                <div class="input-group">
                     <input type="url" class="form-control" id="mod-serv-fotoUrl" value="${s.fotoPerfil ?? ""}">
                 </div>
+                <input type="hidden" id="mod-serv-fotoPublicId">
                 <div class="form-actions">
                     <button class="btn-submit" id="btn-guardar-serv">Guardar</button>
                     <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
                 </div>
             </div>
         `;
+
+        activarSubidaImagen("mod-serv-fotoFile", "mod-serv-fotoUrl", "mod-serv-fotoPublicId", "SERVICIO", "mod-serv-fotoStatus");
 
         document.getElementById("btn-guardar-serv").addEventListener("click", async () => {
             const body = {
@@ -640,6 +692,7 @@ async function abrirModalModificarServicio(servicioId) {
                 duracion: parseInt(document.getElementById("mod-serv-duracion").value) || undefined,
                 precio: parseFloat(document.getElementById("mod-serv-precio").value) || undefined,
                 fotoUrl: document.getElementById("mod-serv-fotoUrl").value || undefined,
+                fotoPublicId: document.getElementById("mod-serv-fotoPublicId").value || undefined,
             };
             try {
                 const res = await fetch(API_URL + `/servicios/modificar/${servicioId}`, {
@@ -722,8 +775,13 @@ function abrirModalAgregarSucursal() {
 
             <p>URL foto de perfil</p>
             <div class="input-group">
+                <input type="file" class="form-control" id="add-suc-fotoFile" accept="image/jpeg,image/png,image/webp,image/gif">
+            </div>
+            <p id="add-suc-fotoStatus" style="font-size:12px;color:var(--t3);">También podés subir una imagen de hasta 5 MB.</p>
+            <div class="input-group">
                 <input type="url" class="form-control" placeholder="https://..." id="add-suc-fotoUrl" required>
             </div>
+            <input type="hidden" id="add-suc-fotoPublicId">
 
             <div class="form-actions">
                 <button class="btn-submit" id="btn-crear-suc">Enviar</button>
@@ -731,6 +789,8 @@ function abrirModalAgregarSucursal() {
             </div>
         </div>
     `;
+
+    activarSubidaImagen("add-suc-fotoFile", "add-suc-fotoUrl", "add-suc-fotoPublicId", "SUCURSAL", "add-suc-fotoStatus");
 
     cargarCategoriasSucursal();
 
@@ -747,6 +807,7 @@ function abrirModalAgregarSucursal() {
         const horaApertura = document.getElementById("add-suc-horaApertura").value;
         const horaCierre = document.getElementById("add-suc-horaCierre").value;
         const fotoUrl = document.getElementById("add-suc-fotoUrl").value;
+        const fotoPublicId = document.getElementById("add-suc-fotoPublicId").value;
         const diasApertura = leerDiasApertura("add-suc");
 
         if (!diasApertura.length) {
@@ -754,7 +815,7 @@ function abrirModalAgregarSucursal() {
             return;
         }
 
-        await postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, diasApertura, fotoUrl, div);
+        await postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, diasApertura, fotoUrl, fotoPublicId, div);
     });
 }
 
@@ -781,7 +842,7 @@ async function cargarCategoriasSucursal() {
     }
 }
 
-async function postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, diasApertura, fotoUrl, modalDiv) {
+async function postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, diasApertura, fotoUrl, fotoPublicId, modalDiv) {
     const datos = {
         nombre,
         direccion,
@@ -791,7 +852,8 @@ async function postSucursal(nombre, direccion, telefono, descripcion, categoriaI
         horaApertura,
         horaCierre,
         diasApertura,
-        fotoUrl
+        fotoUrl,
+        fotoPublicId: fotoPublicId || undefined
     };
 
     try {
@@ -843,8 +905,13 @@ function abrirModalAgregarServicio(sucursalId) {
 
             <p>URL foto de perfil</p>
             <div class="input-group">
+                <input type="file" class="form-control" id="add-serv-fotoFile" accept="image/jpeg,image/png,image/webp,image/gif">
+            </div>
+            <p id="add-serv-fotoStatus" style="font-size:12px;color:var(--t3);">También podés subir una imagen de hasta 5 MB.</p>
+            <div class="input-group">
                 <input type="url" class="form-control" placeholder="https://..." id="add-serv-fotoUrl" required>
             </div>
+            <input type="hidden" id="add-serv-fotoPublicId">
 
             <div class="form-actions">
                 <button class="btn-submit" id="btn-crear-serv">Enviar</button>
@@ -852,6 +919,8 @@ function abrirModalAgregarServicio(sucursalId) {
             </div>
         </div>
     `;
+
+    activarSubidaImagen("add-serv-fotoFile", "add-serv-fotoUrl", "add-serv-fotoPublicId", "SERVICIO", "add-serv-fotoStatus");
 
     document.getElementById("btn-crear-serv").addEventListener("click", async (e) => {
         e.preventDefault();
@@ -861,19 +930,21 @@ function abrirModalAgregarServicio(sucursalId) {
         const duracion = parseInt(document.getElementById("add-serv-duracion").value);
         const precio = parseFloat(document.getElementById("add-serv-precio").value);
         const fotoUrl = document.getElementById("add-serv-fotoUrl").value;
+        const fotoPublicId = document.getElementById("add-serv-fotoPublicId").value;
 
-        await postServicio(nombre, descripcion, duracion, precio, sucursalId, fotoUrl, div);
+        await postServicio(nombre, descripcion, duracion, precio, sucursalId, fotoUrl, fotoPublicId, div);
     });
 }
 
-async function postServicio(nombre, descripcion, duracion, precio, sucursalId, fotoUrl, modalDiv) {
+async function postServicio(nombre, descripcion, duracion, precio, sucursalId, fotoUrl, fotoPublicId, modalDiv) {
     const datos = {
         nombre,
         descripcion,
         duracion,
         precio,
         sucursalId,
-        fotoUrl
+        fotoUrl,
+        fotoPublicId: fotoPublicId || undefined
     };
 
     try {
@@ -911,7 +982,11 @@ async function abrirModalImagenes(sucursalId) {
             <hr style="border-color:var(--b);margin:20px 0;">
             
             <h2 style="font-size:16px; margin-bottom:12px;">Agregar Imágenes</h2>
-            <p style="font-size:12px; color:var(--t3); margin-bottom:8px;">Ingresá las URLs de las imágenes</p>
+            <p style="font-size:12px; color:var(--t3); margin-bottom:8px;">Subí archivos a Cloudinary o ingresá URLs de imágenes.</p>
+            <div class="input-group">
+                <input type="file" class="form-control" id="imagenes-archivos" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+            </div>
+            <p id="imagenes-upload-status" style="font-size:12px;color:var(--t3);"></p>
             
             <div class="input-group">
                 <input type="url" class="form-control" id="input-imagen-url-1" placeholder="https://ejemplo.com/imagen1.jpg">
@@ -937,6 +1012,45 @@ async function abrirModalImagenes(sucursalId) {
     `;
 
     await cargarImagenesEnModal(sucursalId);
+
+    document.getElementById("imagenes-archivos").addEventListener("change", async (event) => {
+        const input = event.currentTarget;
+        const archivos = Array.from(input.files || []);
+        if (!archivos.length) return;
+
+        const cantidadActual = document.querySelectorAll("#imagenes-grid img").length;
+        if (cantidadActual + archivos.length > 5) {
+            alert(`Esta sucursal admite hasta 5 imágenes. Ya tiene ${cantidadActual}.`);
+            input.value = "";
+            return;
+        }
+
+        const status = document.getElementById("imagenes-upload-status");
+        input.disabled = true;
+        try {
+            for (let indice = 0; indice < archivos.length; indice++) {
+                status.textContent = `Subiendo imagen ${indice + 1} de ${archivos.length}…`;
+                const datos = new FormData();
+                datos.append("file", archivos[indice]);
+                const headers = authHeaders();
+                delete headers["Content-Type"];
+                const response = await fetch(API_URL + `/sucursales/${sucursalId}/imagenes/upload`, {
+                    method: "POST",
+                    headers,
+                    body: datos
+                });
+                await checkRes(response);
+            }
+            status.textContent = "Imágenes cargadas.";
+            await cargarImagenesEnModal(sucursalId);
+        } catch (error) {
+            status.textContent = error.message;
+            await cargarImagenesEnModal(sucursalId);
+        } finally {
+            input.disabled = false;
+            input.value = "";
+        }
+    });
 
     document.getElementById("btn-agregar-imagenes").addEventListener("click", async () => {
         const urls = [];

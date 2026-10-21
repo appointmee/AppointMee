@@ -15,6 +15,27 @@ export function authHeaders() {
     return headers;
 }
 
+export async function subirImagenCloudinary(file, tipo) {
+    const datos = new FormData();
+    datos.append("file", file);
+
+    const headers = {};
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const response = await fetch(
+        `${API_URL}/imagenes/upload?tipo=${encodeURIComponent(tipo)}`,
+        { method: "POST", headers, body: datos }
+    );
+
+    if (!response.ok) {
+        const mensaje = await response.text();
+        throw new Error(mensaje || "No se pudo subir la imagen");
+    }
+
+    return await response.json();
+}
+
 export async function sesionActiva() {
 
     try {

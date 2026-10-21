@@ -36,6 +36,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 
 
@@ -101,7 +102,7 @@ public class SucursalService {
 
         suc.setDiasAperturaPorNombre(DiasSemanaUtil.aDias(sucursal.getDiasApertura()));
 
-        suc.setFotoPerfil(imagenService.crearFotoPerfil(sucursal.getFotoUrl()));
+        suc.setFotoPerfil(imagenService.crearFotoPerfil(sucursal.getFotoUrl(), sucursal.getFotoPublicId()));
 
         sucRepo.save(suc);
     }
@@ -150,7 +151,7 @@ public class SucursalService {
 
         // ver si valida bien como ultimo dsp
         if (sucursal.getFotoUrl() != null && !sucursal.getFotoUrl().isBlank()) {
-            imagenService.cambiarFotoPerfilSucursal(suc, sucursal.getFotoUrl());
+            imagenService.cambiarFotoPerfilSucursal(suc, sucursal.getFotoUrl(), sucursal.getFotoPublicId());
         }
 
         sucRepo.save(suc);
@@ -186,10 +187,21 @@ public class SucursalService {
         }
 
         for (String imagen : imagenes.getUrls()) {
-
             imagenService.crearImagenSucursal(sucursal, imagen);
         }
 
+    }
+
+    public ImagenResponseDTO subirImagen(Integer sucursalId, MultipartFile archivo,
+                                         String empleadorEmail) {
+        Sucursal sucursal = listarSucursalPorId(sucursalId);
+        if (!esEmpleadorAca(sucursal, empleadorEmail)) {
+            throw new ForbiddenException("No tenes permisos");
+        }
+        if (imagenService.cuantasImagenesPorSucursal(sucursal) >= 5) {
+            throw new ConflictException("Una sucursal no puede tener mas de 5 imagenes");
+        }
+        return imagenService.subirImagenSucursal(sucursal, archivo);
     }
 
 

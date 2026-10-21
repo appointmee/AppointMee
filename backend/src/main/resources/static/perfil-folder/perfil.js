@@ -1,4 +1,4 @@
-import { API_URL, sesionActiva, authHeaders, cerrarSesion, checkRes } from "../recursos/modulos.js";
+import { API_URL, sesionActiva, authHeaders, cerrarSesion, checkRes, subirImagenCloudinary } from "../recursos/modulos.js";
 
 
 const user = await sesionActiva();
@@ -216,11 +216,19 @@ function renderModificar(usuario) {
 </div>
 
 <div class="input-group">
+    <input type="file"
+           class="form-control"
+           accept="image/jpeg,image/png,image/webp,image/gif"
+           id="foto-file-input">
+</div>
+<p id="foto-upload-status" style="font-size:12px;color:var(--t3);">Elegí JPG, PNG, WEBP o GIF de hasta 5 MB.</p>
+<div class="input-group">
     <input type="url"
            class="form-control"
-           placeholder="URL de foto de perfil"
+           placeholder="O pegá la URL de foto de perfil"
            id="foto-url-input">
 </div>
+<input type="hidden" id="foto-public-id-input">
 <div class="form-actions">
     <button class="btn-cancel" id="cancelar">Volver</button>
     <button class="btn-submit" id="modificar">Modificar</button>
@@ -232,6 +240,38 @@ function renderModificar(usuario) {
     const cancelar = document.getElementById("cancelar");
     const modificar = document.getElementById("modificar");
     const eliminar = document.getElementById("btn-eliminar-perfil");
+    const fotoFileInput = document.getElementById("foto-file-input");
+    const fotoUrlInput = document.getElementById("foto-url-input");
+    const fotoPublicIdInput = document.getElementById("foto-public-id-input");
+    const fotoUploadStatus = document.getElementById("foto-upload-status");
+    let ultimaUrlSubida = null;
+
+    fotoFileInput.addEventListener("change", async () => {
+        const file = fotoFileInput.files?.[0];
+        if (!file) return;
+
+        fotoFileInput.disabled = true;
+        fotoUploadStatus.textContent = "Subiendo imagen…";
+        try {
+            const imagen = await subirImagenCloudinary(file, "PERFIL");
+            fotoUrlInput.value = imagen.url;
+            fotoPublicIdInput.value = imagen.publicId;
+            ultimaUrlSubida = imagen.url;
+            fotoUploadStatus.textContent = "Imagen subida. Se guardará al modificar el perfil.";
+        } catch (error) {
+            fotoUploadStatus.textContent = error.message;
+            fotoFileInput.value = "";
+        } finally {
+            fotoFileInput.disabled = false;
+        }
+    });
+
+    fotoUrlInput.addEventListener("input", () => {
+        if (ultimaUrlSubida !== null && fotoUrlInput.value.trim() !== ultimaUrlSubida) {
+            fotoPublicIdInput.value = "";
+            ultimaUrlSubida = null;
+        }
+    });
 
 
     cancelar.addEventListener('click', async () => {
@@ -271,6 +311,7 @@ async function modificarUsuario(id) {
         const password = document.getElementById("password-input").value.trim();
         const email = document.getElementById("email-input").value.trim();
         const fotoUrl = document.getElementById("foto-url-input").value.trim();
+        const fotoPublicId = document.getElementById("foto-public-id-input").value.trim();
         const password2 = document.getElementById("password-confirm-input").value.trim();
 
         const body = {};
@@ -297,6 +338,7 @@ async function modificarUsuario(id) {
         if (password) body.password = password;
         if (email) body.email = email;
         if (fotoUrl) body.fotoUrl = fotoUrl;
+        if (fotoPublicId) body.fotoPublicId = fotoPublicId;
 
         const response = await fetch(
             API_URL + `/usuarios/modificar/${id}`,
