@@ -65,12 +65,19 @@ async function cargarSucursales() {
 async function cargarTurnos(sucursalId) {
 
     try {
-        const res = await fetch(
-            API_URL + `/turnos/de-sucursal/${sucursalId}/propios?estadoTurno=PENDIENTE`,
-            { headers: authHeaders() }
+        const headers = authHeaders();
+        const [pendientesResponse, confirmadosResponse] = await Promise.all([
+            fetch(API_URL + `/turnos/de-sucursal/${sucursalId}/propios?estadoTurno=PENDIENTE`, { headers }),
+            fetch(API_URL + `/turnos/de-sucursal/${sucursalId}/propios?estadoTurno=CONFIRMADO`, { headers })
+        ]);
+        await Promise.all([checkRes(pendientesResponse), checkRes(confirmadosResponse)]);
+        const [pendientes, confirmados] = await Promise.all([
+            pendientesResponse.json(),
+            confirmadosResponse.json()
+        ]);
+        turnos = [...confirmados, ...pendientes].sort(
+            (a, b) => new Date(a.fechaTurno) - new Date(b.fechaTurno)
         );
-        await checkRes(res);
-        turnos = await res.json();
     } catch (e) {
         turnos = [];
     }
@@ -110,6 +117,7 @@ function renderTurnos() {
         const fecha = formatearFechaLocal(turno.fechaTurno);
         const estadoBadge = {
             PENDIENTE: 'badge--amber',
+            CONFIRMADO: 'badge--green',
             REALIZADO: 'badge--green',
             CANCELADO: 'badge--red',
             PAGO_RECHAZADO: 'badge--red'
