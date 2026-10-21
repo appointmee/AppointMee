@@ -25,6 +25,23 @@ El proyecto no usa migraciones automáticas (`spring.jpa.hibernate.ddl-auto=vali
 por lo que los scripts de `backend/src/main/resources/db/` hay que correrlos a mano en la base.
 Por ejemplo, `db/sucursal_dias_apertura.sql` agrega la columna con los días de la semana
 que abre cada sucursal (los días que no figuran se toman como cerrados).
+
+## Imágenes con Cloudinary
+
+Las subidas se hacen desde el backend para mantener privada la clave secreta. Antes de
+iniciar el backend, configurá estas variables de entorno con los datos de tu cuenta:
+
+```text
+CLOUDINARY_CLOUD_NAME
+CLOUDINARY_API_KEY
+CLOUDINARY_API_SECRET
+```
+
+En PostgreSQL, ejecutá una sola vez `backend/src/main/resources/db/imagenes_cloudinary.sql`
+antes de desplegar el backend actualizado. El script agrega `public_id` a `imagenes` y
+amplía el tamaño de `url` para guardar las URL seguras de Cloudinary. Las imágenes
+anteriores que solo tienen URL siguen siendo válidas. Las nuevas subidas aceptan JPG,
+PNG, WEBP y GIF, hasta 5 MB.
    
 ## Frontend
 
