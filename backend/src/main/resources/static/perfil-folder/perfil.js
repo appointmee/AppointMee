@@ -1,4 +1,4 @@
-import { API_URL, sesionActiva, authHeaders, cerrarSesion, checkRes, subirImagenCloudinary } from "../recursos/modulos.js";
+import { API_URL, sesionActiva, authHeaders, cerrarSesion, checkRes, checkResSinRedireccion, activarSubidaImagen } from "../recursos/modulos.js";
 
 
 const user = await sesionActiva();
@@ -240,50 +240,32 @@ function renderModificar(usuario) {
     const cancelar = document.getElementById("cancelar");
     const modificar = document.getElementById("modificar");
     const eliminar = document.getElementById("btn-eliminar-perfil");
-    const fotoFileInput = document.getElementById("foto-file-input");
-    const fotoUrlInput = document.getElementById("foto-url-input");
-    const fotoPublicIdInput = document.getElementById("foto-public-id-input");
-    const fotoUploadStatus = document.getElementById("foto-upload-status");
-    let ultimaUrlSubida = null;
-
-    fotoFileInput.addEventListener("change", async () => {
-        const file = fotoFileInput.files?.[0];
-        if (!file) return;
-
-        fotoFileInput.disabled = true;
-        fotoUploadStatus.textContent = "Subiendo imagen…";
-        try {
-            const imagen = await subirImagenCloudinary(file, "PERFIL");
-            fotoUrlInput.value = imagen.url;
-            fotoPublicIdInput.value = imagen.publicId;
-            ultimaUrlSubida = imagen.url;
-            fotoUploadStatus.textContent = "Imagen subida. Se guardará al modificar el perfil.";
-        } catch (error) {
-            fotoUploadStatus.textContent = error.message;
-            fotoFileInput.value = "";
-        } finally {
-            fotoFileInput.disabled = false;
-        }
-    });
-
-    fotoUrlInput.addEventListener("input", () => {
-        if (ultimaUrlSubida !== null && fotoUrlInput.value.trim() !== ultimaUrlSubida) {
-            fotoPublicIdInput.value = "";
-            ultimaUrlSubida = null;
-        }
-    });
+    const subirFotoPendiente = activarSubidaImagen("foto-file-input", "foto-url-input",
+        "foto-public-id-input", "PERFIL", "foto-upload-status");
 
 
     cancelar.addEventListener('click', async () => {
-
-        await renderOpciones(usuario);
+        if (cancelar.disabled) return;
+        cancelar.disabled = true;
+        modificar.disabled = true;
+        if (eliminar) eliminar.disabled = true;
+        try {
+            await subirFotoPendiente.descartar();
+            await renderOpciones(usuario);
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            cancelar.disabled = false;
+            modificar.disabled = false;
+            if (eliminar) eliminar.disabled = false;
+        }
 
     });
 
 
     modificar.addEventListener('click', () => {
 
-        modificarUsuario(usuario.id);
+        modificarUsuario(usuario.id, subirFotoPendiente);
 
     });
 
@@ -303,15 +285,28 @@ function renderModificar(usuario) {
 }
 
 
-async function modificarUsuario(id) {
+async function modificarUsuario(id, subirFotoPendiente) {
+    const botonModificar = document.getElementById("modificar");
+    if (botonModificar.disabled) return;
+    const botonCancelar = document.getElementById("cancelar");
+    const botonEliminar = document.getElementById("btn-eliminar-perfil");
+    const campos = ["nombre-input", "apellido-input", "email-input", "password-input",
+        "password-confirm-input", "foto-file-input", "foto-url-input"]
+        .map(idCampo => document.getElementById(idCampo)).filter(Boolean)
+        .map(campo => [campo, Boolean(campo.disabled)]);
+    campos.forEach(([campo]) => { campo.disabled = true; });
+    botonModificar.disabled = true;
+    botonCancelar.disabled = true;
+    if (botonEliminar) botonEliminar.disabled = true;
     try {
 
         const nombre = document.getElementById("nombre-input").value.trim();
         const apellido = document.getElementById("apellido-input").value.trim();
         const password = document.getElementById("password-input").value.trim();
         const email = document.getElementById("email-input").value.trim();
-        const fotoUrl = document.getElementById("foto-url-input").value.trim();
-        const fotoPublicId = document.getElementById("foto-public-id-input").value.trim();
+        const fotoFileInput = document.getElementById("foto-file-input");
+        const fotoUrlInput = document.getElementById("foto-url-input");
+        const fotoPublicIdInput = document.getElementById("foto-public-id-input");
         const password2 = document.getElementById("password-confirm-input").value.trim();
 
         const body = {};
@@ -320,7 +315,8 @@ async function modificarUsuario(id) {
             nombre === "" &&
             apellido === "" &&
             email === "" &&
-            fotoUrl === "" &&
+            fotoUrlInput.value.trim() === "" &&
+            !fotoFileInput.files?.length &&
             password2 === "" &&
             password === ""
         ) {
@@ -337,6 +333,11 @@ async function modificarUsuario(id) {
         }
         if (password) body.password = password;
         if (email) body.email = email;
+
+        await subirFotoPendiente();
+
+        const fotoUrl = fotoUrlInput.value.trim();
+        const fotoPublicId = fotoPublicIdInput.value.trim();
         if (fotoUrl) body.fotoUrl = fotoUrl;
         if (fotoPublicId) body.fotoPublicId = fotoPublicId;
 
@@ -348,13 +349,24 @@ async function modificarUsuario(id) {
                 headers: authHeaders(),
             }
         );
-        await checkRes(response);
+        await checkResSinRedireccion(response);
+        subirFotoPendiente.confirmar();
 
         alert("Usuario modificado con éxito");
 
     } catch (error) {
+        try {
+            await subirFotoPendiente.descartar();
+        } catch (limpieza) {
+            alert(limpieza.message);
+        }
         alert(error.message);
         console.error(error);
+    } finally {
+        botonModificar.disabled = false;
+        botonCancelar.disabled = false;
+        if (botonEliminar) botonEliminar.disabled = false;
+        campos.forEach(([campo, deshabilitado]) => { campo.disabled = deshabilitado; });
     }
 }
 

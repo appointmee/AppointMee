@@ -36,6 +36,68 @@ export async function subirImagenCloudinary(file, tipo) {
     return await response.json();
 }
 
+export async function descartarImagenCloudinary(imagen) {
+    if (!imagen?.tokenCancelacion) return;
+
+    const response = await fetch(`${API_URL}/imagenes/upload`, {
+        method: "DELETE",
+        headers: authHeaders(),
+        body: JSON.stringify({
+            publicId: imagen.publicId,
+            tokenCancelacion: imagen.tokenCancelacion
+        })
+    });
+    if (!response.ok) {
+        throw new Error("No se pudo limpiar la imagen subida; volvé a intentar antes de cerrar.");
+    }
+}
+
+export function activarSubidaImagen(fileId, urlId, publicIdId, tipo, statusId) {
+    const fileInput = document.getElementById(fileId);
+    const urlInput = document.getElementById(urlId);
+    const publicIdInput = document.getElementById(publicIdId);
+    const status = document.getElementById(statusId);
+    let imagenPendiente = null;
+
+    fileInput.addEventListener("change", () => {
+        if (fileInput.files?.length && status) {
+            status.textContent = "Imagen seleccionada. Se subirá al guardar.";
+        }
+    });
+    urlInput.addEventListener("input", () => {
+        fileInput.value = "";
+        publicIdInput.value = "";
+        if (status) status.textContent = "Se usará la URL ingresada.";
+    });
+
+    const subirAlGuardar = async () => {
+        const file = fileInput.files?.[0];
+        if (!file) {
+            if (imagenPendiente && urlInput.value !== imagenPendiente.url) {
+                await subirAlGuardar.descartar();
+            }
+            return;
+        }
+        if (imagenPendiente) await subirAlGuardar.descartar();
+        if (status) status.textContent = "Subiendo imagen…";
+        imagenPendiente = await subirImagenCloudinary(file, tipo);
+        urlInput.value = imagenPendiente.url;
+        publicIdInput.value = imagenPendiente.publicId;
+        fileInput.value = "";
+        if (status) status.textContent = "Imagen subida. Guardando formulario…";
+    };
+    subirAlGuardar.confirmar = () => { imagenPendiente = null; };
+    subirAlGuardar.descartar = async () => {
+        if (!imagenPendiente) return;
+        await descartarImagenCloudinary(imagenPendiente);
+        if (urlInput.value === imagenPendiente.url) urlInput.value = "";
+        publicIdInput.value = "";
+        imagenPendiente = null;
+        if (status) status.textContent = "La imagen subida se descartó.";
+    };
+    return subirAlGuardar;
+}
+
 export async function sesionActiva() {
 
     try {
@@ -71,6 +133,14 @@ export async function checkRes(response) {
         const msg = text || "Error desconocido";
         window.location.href = `../error-folder/Error.html?msg=${encodeURIComponent(msg)}`;
         throw new Error(msg);
+    }
+    return response;
+}
+
+export async function checkResSinRedireccion(response) {
+    if (!response.ok) {
+        const mensaje = await response.text();
+        throw new Error(mensaje || "No se pudo guardar");
     }
     return response;
 }
