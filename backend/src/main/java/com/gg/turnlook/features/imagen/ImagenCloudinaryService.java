@@ -7,6 +7,9 @@ import com.gg.turnlook.features.imagen.dto.ImagenSubidaDTO;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Locale;
+import java.net.URI;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -60,9 +63,16 @@ public class ImagenCloudinaryService {
 
             Object url = resultado.get("secure_url");
             Object publicId = resultado.get("public_id");
-            if (!(url instanceof String urlSegura) || !urlSegura.startsWith("https://")
-                    || !(publicId instanceof String id) || !id.startsWith(CARPETA_RAIZ)) {
+            if (!(publicId instanceof String id) || !esImagenPropia(id)) {
                 throw new BadRequestException("Cloudinary devolvió datos incompletos para la imagen");
+            }
+            String urlSegura = url instanceof String valor ? valor : null;
+            try {
+                validarReferencia(urlSegura, id);
+            } catch (BadRequestException error) {
+                try { eliminar(id); }
+                catch (RuntimeException limpieza) { error.addSuppressed(limpieza); }
+                throw error;
             }
 
             return new ImagenSubidaDTO(
@@ -89,7 +99,7 @@ public class ImagenCloudinaryService {
         try {
             Map<?, ?> resultado = cloudinary.uploader().destroy(
                     publicId,
-                    ObjectUtils.asMap("resource_type", "image")
+                    ObjectUtils.asMap("resource_type", "image", "invalidate", true)
             );
             Object estado = resultado.get("result");
             if (!"ok".equals(estado) && !"not found".equals(estado)) {
@@ -104,7 +114,30 @@ public class ImagenCloudinaryService {
     }
 
     public boolean esImagenPropia(String publicId) {
-        return publicId != null && publicId.startsWith(CARPETA_RAIZ);
+        return publicId != null && publicId.length() <= 255
+                && publicId.matches("appointmee/(perfiles|sucursales|servicios|galerias)/[A-Za-z0-9_/-]+")
+                && !publicId.endsWith("/") && !publicId.contains("//");
+    }
+
+    public void validarReferencia(String url, String publicId) {
+        if (url == null || !esImagenPropia(publicId)) {
+            throw new BadRequestException("La referencia de Cloudinary es inválida");
+        }
+        try {
+            URI uri = URI.create(url);
+            String ruta = "/" + cloudName + "/image/upload/";
+            String patron = Pattern.quote(ruta) + "(?:v[0-9]+/)?"
+                    + Pattern.quote(publicId) + "\\.(?:jpg|jpeg|png|webp|gif)";
+            if (!esImagenPropia(publicId) || url.length() > 1000
+                    || !"https".equals(uri.getScheme()) || !"res.cloudinary.com".equals(uri.getHost())
+                    || uri.getPort() != -1 || uri.getUserInfo() != null
+                    || uri.getQuery() != null || uri.getFragment() != null
+                    || !uri.getPath().matches(patron)) {
+                throw new BadRequestException("La URL no corresponde a la imagen de Cloudinary indicada");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("La URL de Cloudinary es inválida");
+        }
     }
 
     private void validarConfiguracion() {
@@ -130,7 +163,7 @@ public class ImagenCloudinaryService {
 
         try {
             byte[] contenido = archivo.getBytes();
-            if (!coincideFormato(contenido, tipoContenido.toLowerCase())) {
+            if (!coincideFormato(contenido, tipoContenido.toLowerCase(Locale.ROOT))) {
                 throw new BadRequestException("El contenido del archivo no coincide con su formato");
             }
         } catch (IOException e) {

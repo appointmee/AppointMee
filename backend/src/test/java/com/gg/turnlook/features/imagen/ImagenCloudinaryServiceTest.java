@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -132,5 +133,36 @@ class ImagenCloudinaryServiceTest {
         when(uploader.destroy(any(String.class), anyMap())).thenReturn(Map.of("result", "error"));
 
         assertThrows(BadRequestException.class, () -> service.eliminar("appointmee/perfiles/foto"));
+    }
+
+    @Test
+    void validaQueLaUrlSeaDelMismoCloudYPublicId() {
+        service.validarReferencia("https://res.cloudinary.com/cloud/image/upload/v123/appointmee/perfiles/foto.png",
+                "appointmee/perfiles/foto");
+        assertThrows(BadRequestException.class, () -> service.validarReferencia(
+                "https://res.cloudinary.com/otro/image/upload/appointmee/perfiles/foto.png", "appointmee/perfiles/foto"));
+        assertThrows(BadRequestException.class, () -> service.validarReferencia(
+                "https://res.cloudinary.com/cloud/image/upload/appointmee/perfiles/otra.png", "appointmee/perfiles/foto"));
+        assertThrows(BadRequestException.class, () -> service.validarReferencia(
+                "https://example.com/appointmee/perfiles/foto.png", "appointmee/perfiles/foto"));
+    }
+
+    @Test
+    void invalidaLaCopiaEnCacheAlBorrar() throws Exception {
+        when(uploader.destroy(any(String.class), anyMap())).thenReturn(Map.of("result", "ok"));
+        service.eliminar("appointmee/perfiles/foto");
+        verify(uploader).destroy(eq("appointmee/perfiles/foto"),
+                org.mockito.ArgumentMatchers.argThat(opciones -> Boolean.TRUE.equals(opciones.get("invalidate"))));
+    }
+
+    @Test
+    void descartaLaSubidaSiCloudinaryDevuelveElIdPeroNoUnaUrlValida() throws Exception {
+        when(uploader.upload(any(), anyMap())).thenReturn(Map.of("public_id", "appointmee/perfiles/foto"));
+        when(uploader.destroy(anyString(), anyMap())).thenReturn(Map.of("result", "ok"));
+        MockMultipartFile archivo = new MockMultipartFile("file", "foto.jpg", "image/jpeg",
+                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF});
+
+        assertThrows(BadRequestException.class, () -> service.subir(archivo, ImagenCloudinaryTipo.PERFIL));
+        verify(uploader).destroy(eq("appointmee/perfiles/foto"), anyMap());
     }
 }

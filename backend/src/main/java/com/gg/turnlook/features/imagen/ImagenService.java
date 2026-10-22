@@ -9,6 +9,7 @@ import com.gg.turnlook.features.sucursal.Sucursal;
 import com.gg.turnlook.features.usuario.Usuario;
 import java.util.List;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 
@@ -52,12 +53,21 @@ public class ImagenService {
 
     public ImagenResponseDTO subirImagenSucursal(Sucursal sucursal, MultipartFile archivo){
         ImagenSubidaDTO subida = cloudinaryService.subir(archivo, ImagenCloudinaryTipo.GALERIA);
-        Imagen imagen = new Imagen();
-        imagen.setSucursal(sucursal);
-        imagen.setUrl(subida.url());
-        imagen.setPublicId(subida.publicId());
-        imagenRepo.save(imagen);
-        return new ImagenResponseDTO(imagen.getId(), imagen.getFotoValida());
+        try {
+            Imagen imagen = new Imagen();
+            imagen.setSucursal(sucursal);
+            imagen.setUrl(subida.url());
+            imagen.setPublicId(subida.publicId());
+            imagenRepo.saveAndFlush(imagen);
+            return new ImagenResponseDTO(imagen.getId(), imagen.getFotoValida());
+        } catch (RuntimeException error) {
+            try {
+                cloudinaryService.eliminar(subida.publicId());
+            } catch (RuntimeException limpieza) {
+                error.addSuppressed(limpieza);
+            }
+            throw error;
+        }
     }
 
 
@@ -80,6 +90,7 @@ public class ImagenService {
     }
 
 
+    @Transactional
     public void eliminarFotoPerfilUsuario(Usuario usuario){
 
         Imagen imagen = usuario.getFotoPerfil();
@@ -90,15 +101,17 @@ public class ImagenService {
         imagen.setUrl(null);
         imagen.setPublicId(null);
 
-        imagenRepo.save(imagen);
-        cloudinaryService.eliminar(publicIdAnterior);
+        imagenRepo.saveAndFlush(imagen);
+        eliminarArchivoSinUso(publicIdAnterior);
     }
 
 
+    @Transactional
     public void cambiarFotoPerfilUsuario(Usuario usuario, String url){
         cambiarFotoPerfilUsuario(usuario, url, null);
     }
 
+    @Transactional
     public void cambiarFotoPerfilUsuario(Usuario usuario, String url, String publicId){
 
         Imagen imagen = usuario.getFotoPerfil();
@@ -113,10 +126,12 @@ public class ImagenService {
     }
 
 
+    @Transactional
     public void cambiarFotoPerfilSucursal(Sucursal sucursal, String url){
         cambiarFotoPerfilSucursal(sucursal, url, null);
     }
 
+    @Transactional
     public void cambiarFotoPerfilSucursal(Sucursal sucursal, String url, String publicId){
 
         Imagen imagen = sucursal.getFotoPerfil();
@@ -131,10 +146,12 @@ public class ImagenService {
     }
 
 
+    @Transactional
     public void cambiarFotoPerfilServicio(Servicio servicio, String url){
         cambiarFotoPerfilServicio(servicio, url, null);
     }
 
+    @Transactional
     public void cambiarFotoPerfilServicio(Servicio servicio, String url, String publicId){
 
         Imagen imagen = servicio.getFotoPerfil();
@@ -171,10 +188,12 @@ public class ImagenService {
 
 
     // ver mas este
+    @Transactional
     public void eliminarImagen(Imagen imagen){
         String publicId = imagen.getPublicId();
         imagenRepo.delete(imagen);
-        cloudinaryService.eliminar(publicId);
+        imagenRepo.flush();
+        eliminarArchivoSinUso(publicId);
     }
 
     private void reemplazarImagen(Imagen imagen, String url, String publicId) {
@@ -188,10 +207,17 @@ public class ImagenService {
 
         imagen.setUrl(url);
         imagen.setPublicId(publicIdNuevo);
-        imagenRepo.save(imagen);
+        imagenRepo.saveAndFlush(imagen);
 
         if (publicIdAnterior != null && !publicIdAnterior.equals(publicIdNuevo)) {
-            cloudinaryService.eliminar(publicIdAnterior);
+            eliminarArchivoSinUso(publicIdAnterior);
+        }
+    }
+
+    private void eliminarArchivoSinUso(String publicId) {
+        if (publicId != null && !publicId.isBlank()
+                && imagenRepo.contarEnUsoPorPublicId(publicId) == 0) {
+            cloudinaryService.eliminar(publicId);
         }
     }
 
@@ -206,9 +232,13 @@ public class ImagenService {
     }
 
     private void validarUrlParaPublicId(String url, String publicId) {
+        if (url != null && url.length() > 1000) {
+            throw new BadRequestException("La URL de la imagen no puede superar los 1000 caracteres");
+        }
         if (publicId != null && (url == null || url.isBlank())) {
             throw new BadRequestException("La URL de la imagen es obligatoria junto con su public_id");
         }
+        if (publicId != null) cloudinaryService.validarReferencia(url, publicId);
     }
 
 }
