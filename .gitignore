@@ -87,3 +87,6 @@ surefire-reports/
 node_modules/
 .angular/
 dist/
+
+# Configuración local con credenciales
+**/.vscode/launch.json
