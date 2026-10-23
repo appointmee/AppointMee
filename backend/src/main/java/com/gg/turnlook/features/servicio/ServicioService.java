@@ -5,6 +5,7 @@ import com.gg.turnlook.common.exception.ForbiddenException;
 import com.gg.turnlook.common.exception.NotFoundException;
 import com.gg.turnlook.features.imagen.ImagenService;
 import com.gg.turnlook.features.resenia.ReseniaService;
+import com.gg.turnlook.features.resenia.ReseniaService.ResumenPuntuacion;
 import com.gg.turnlook.features.servicio.dto.ServicioCrearDTO;
 import com.gg.turnlook.features.servicio.dto.ServicioMiniDTO;
 import com.gg.turnlook.features.servicio.dto.ServicioModificarDTO;
@@ -13,11 +14,8 @@ import com.gg.turnlook.features.sucursal.Sucursal;
 import com.gg.turnlook.features.sucursal.SucursalService;
 import com.gg.turnlook.features.usuario.Usuario;
 import java.util.List;
+import java.util.Map;
 import org.springframework.stereotype.Service;
-
-
-
-
 
 
 
@@ -63,7 +61,7 @@ public class ServicioService {
                 servicio.getPrecio(), sucursal
         );
 
-        serv.setFotoPerfil(imagenService.crearFotoPerfil(servicio.getFotoUrl()));
+        serv.setFotoPerfil(imagenService.crearFotoPerfil(servicio.getFotoUrl(), servicio.getFotoPublicId()));
 
         servRepo.save(serv);
     }
@@ -91,7 +89,7 @@ public class ServicioService {
         }
 
         if(servicio.getFotoUrl() != null && !servicio.getFotoUrl().isBlank()){
-            imagenService.cambiarFotoPerfilServicio(servOld,  servicio.getFotoUrl());
+            imagenService.cambiarFotoPerfilServicio(servOld, servicio.getFotoUrl(), servicio.getFotoPublicId());
         }
 
         servRepo.save(servOld);
@@ -122,13 +120,33 @@ public class ServicioService {
 
         sucService.listarSucursalPorId(sucursalId);  //validacion
 
-        return servRepo.findBySucursalId(sucursalId).stream()
+        List<Servicio> servicios = servRepo.findBySucursalId(sucursalId);
+
+        // Las puntuaciones de todos los servicios en una sola query, en vez de
+        // dos por servicio.
+        Map<Integer, ResumenPuntuacion> puntuaciones =
+                reseniaService.getPuntuacionesServicios(
+                        servicios.stream().map(Servicio::getId).toList());
+
+        return servicios.stream()
                 .map(s -> new ServicioMiniDTO(s.getId(), s.getNombre(),
                         s.getDuracion(), s.getFotoPerfil().getFotoValida(),
-                        reseniaService.getPuntuacionPromedioServicio(s.getId()),
-                        reseniaService.getPuntuacionesTotalesServicio(s.getId()))
+                        puntuacionDe(puntuaciones.get(s.getId())),
+                        cantidadDe(puntuaciones.get(s.getId())))
                 )
                 .toList();
+    }
+
+
+    private static Integer puntuacionDe(ResumenPuntuacion resumen) {
+
+        return resumen == null ? null : resumen.promedioRedondeado();
+    }
+
+
+    private static Long cantidadDe(ResumenPuntuacion resumen) {
+
+        return resumen == null ? 0L : resumen.cantidad();
     }
 
 

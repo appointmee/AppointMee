@@ -2,22 +2,12 @@ package com.gg.turnlook.features.pago;
 
 import com.gg.turnlook.common.exception.ConflictException;
 import com.gg.turnlook.common.exception.ForbiddenException;
-import com.gg.turnlook.features.servicio.Servicio;
 import com.gg.turnlook.features.turno.EstadoTurno;
 import com.gg.turnlook.features.turno.Turno;
 import com.gg.turnlook.features.turno.TurnoService;
-import com.mercadopago.MercadoPagoConfig;
-import com.mercadopago.client.payment.PaymentClient;
-import com.mercadopago.client.preference.PreferenceClient;
-import com.mercadopago.client.preference.PreferenceItemRequest;
-import com.mercadopago.client.preference.PreferenceRequest;
 import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.exceptions.MPException;
-import com.mercadopago.resources.payment.Payment;
-import com.mercadopago.resources.preference.Preference;
-import java.util.ArrayList;
-import java.util.List;
-import org.springframework.beans.factory.annotation.Value;
+import java.util.Locale;
 import org.springframework.stereotype.Service;
 
 
@@ -31,16 +21,12 @@ public class MercadoPagoService {
 
 
     private final TurnoService turnoService;
+    private final MercadoPagoGateway mercadoPagoGateway;
 
 
-    // mp test
-    @Value("${mercadopago.access-token}")
-    private String tokenMp;
-
-
-
-    public MercadoPagoService(TurnoService turnoService) {
+    public MercadoPagoService(TurnoService turnoService, MercadoPagoGateway mercadoPagoGateway) {
         this.turnoService = turnoService;
+        this.mercadoPagoGateway = mercadoPagoGateway;
     }
 
 
@@ -50,8 +36,6 @@ public class MercadoPagoService {
 
     public String pagar(Integer turnoId, String clienteEmail)
             throws MPException, MPApiException {
-
-        MercadoPagoConfig.setAccessToken(tokenMp);
 
         Turno turno = turnoService.listarTurnoPorId(turnoId);
 
@@ -63,49 +47,56 @@ public class MercadoPagoService {
             throw new ConflictException("Solo se pueden pagar turnos pendientes");
         }
 
-        Servicio servicio = turno.getServicio();
-
-        PreferenceItemRequest item = PreferenceItemRequest.builder()
-                .title(servicio.getNombre())
-                .description(servicio.getDescripcion())
-                .quantity(1)
-                .currencyId("ARS")
-                .unitPrice(servicio.getPrecio())
-                .build();
-
-        List<PreferenceItemRequest> items = new ArrayList<>();
-        items.add(item);
-
-        PreferenceRequest preferenceRequest = PreferenceRequest.builder()
-                .items(items)
-                .externalReference(turno.getId().toString())
-                .notificationUrl("https://appointmee-vcs2.onrender.com/pagos/webhook")
-                .build();
-
-        PreferenceClient client = new PreferenceClient();
-        Preference preference = client.create(preferenceRequest);
-
-        return preference.getInitPoint();
+        return mercadoPagoGateway.crearPreferencia(turno);
     }
 
 
     public String procesarWebhook(Long pagoId) throws MPException, MPApiException {
 
-        MercadoPagoConfig.setAccessToken(tokenMp);
-
-        PaymentClient client = new PaymentClient();
-
-        Payment payment = client.get(pagoId);
-
-        Integer turnoId = Integer.valueOf(payment.getExternalReference());
-
-        if (!"approved".equals(payment.getStatus())) {
-
-            turnoService.setearPagoRechazado(turnoId);
-            return "Error al realizar el pago";
+        PagoMercadoPago pago = mercadoPagoGateway.obtenerPago(pagoId);
+        if (pago.externalReference() == null || pago.externalReference().isBlank()) {
+            throw new IllegalArgumentException("El pago no referencia un turno");
         }
 
-        return "Pago exitoso\nTurno confirmado";
+        final Integer turnoId;
+        try {
+            turnoId = Integer.valueOf(pago.externalReference());
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("La referencia del turno no es válida", exception);
+        }
+
+        if (pago.status() == null) {
+            throw new IllegalArgumentException("El pago no tiene un estado válido");
+        }
+
+        switch (pago.status().toLowerCase(Locale.ROOT)) {
+            case "approved" -> {
+                EstadoTurno estado = turnoService.setearPagoAprobado(turnoId);
+                return estado == EstadoTurno.CONFIRMADO || estado == EstadoTurno.REALIZADO
+                        ? "Pago aprobado. Turno confirmado"
+                        : "Pago aprobado, pero el turno no pudo confirmarse por su estado actual";
+            }
+            case "rejected", "cancelled" -> {
+                EstadoTurno estado = turnoService.setearPagoRechazado(turnoId);
+                return estado == EstadoTurno.PAGO_RECHAZADO
+                        ? "Pago rechazado"
+                        : "Resultado de pago recibido; turno no modificado";
+            }
+            case "pending", "in_process", "authorized", "in_mediation" -> {
+                EstadoTurno estado = turnoService.verificarTurnoParaWebhook(turnoId);
+                if (estado == EstadoTurno.CONFIRMADO || estado == EstadoTurno.REALIZADO) {
+                    return "El turno ya está confirmado; se ignoró el estado pendiente atrasado";
+                }
+                if (estado == EstadoTurno.PAGO_RECHAZADO) {
+                    return "El turno ya está rechazado; se ignoró el estado pendiente atrasado";
+                }
+                return "Pago pendiente de resolución";
+            }
+            default -> {
+                turnoService.verificarTurnoParaWebhook(turnoId);
+                return "Estado de pago recibido sin cambios";
+            }
+        }
     }
 
 

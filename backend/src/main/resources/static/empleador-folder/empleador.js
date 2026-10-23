@@ -1,4 +1,16 @@
-import { API_URL, authHeaders, sesionActiva, checkRes, formatearFechaLocal } from "../recursos/modulos.js";
+import {
+    API_URL,
+    authHeaders,
+    sesionActiva,
+    checkRes,
+    checkResSinRedireccion,
+    formatearFechaLocal,
+    DIAS_SEMANA,
+    checksDiasAperturaHTML,
+    leerDiasApertura,
+    marcarTodosLosDias,
+    activarSubidaImagen
+} from "../recursos/modulos.js";
 
 const user = await sesionActiva();
 
@@ -33,10 +45,45 @@ function crearModal(id) {
     div.className = "modal-overlay";
     div.id = id;
     div.addEventListener("click", (e) => {
-        if (e.target === div) div.remove();
+        if (e.target === div) cerrarModal(div);
     });
     document.body.appendChild(div);
     return div;
+}
+
+async function cerrarModal(div) {
+    try {
+        await guardarModal(div, async () => {
+            if (div.descartarImagenPendiente) await div.descartarImagenPendiente();
+            div.remove();
+        });
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+async function guardarModal(div, guardar) {
+    if (div.dataset.guardando) return;
+    div.dataset.guardando = "true";
+    const controles = [...div.querySelectorAll("button, input, textarea, select")]
+        .map(control => [control, Boolean(control.disabled)]);
+    controles.forEach(([control]) => { control.disabled = true; });
+    try {
+        await guardar();
+    } finally {
+        controles.forEach(([control, deshabilitado]) => { control.disabled = deshabilitado; });
+        delete div.dataset.guardando;
+    }
+}
+
+// Enciende los botones "Todos" / "Ninguno" de los checks de dias de apertura.
+function activarDiasApertura(prefijo, contenedor) {
+    contenedor.querySelectorAll("[data-marcar-todos]").forEach(btn => {
+        btn.addEventListener("click", () => marcarTodosLosDias(prefijo, true));
+    });
+    contenedor.querySelectorAll("[data-marcar-ninguno]").forEach(btn => {
+        btn.addEventListener("click", () => marcarTodosLosDias(prefijo, false));
+    });
 }
 
 async function cargarMe() {
@@ -487,19 +534,39 @@ async function abrirModalModificarSucursal(sucursalId) {
             <div class="input-group">
                 <input type="time" class="form-control" id="mod-suc-horaCierre" value="${suc.horaCierre}">
             </div>
+            <p>Días de apertura</p>
+            <div class="dias-apertura">
+                <div class="dias-apertura__acciones">
+                    <button type="button" class="btn-ghost btn-ghost--mini" data-no-cooldown data-marcar-todos="mod-suc">Todos</button>
+                    <button type="button" class="btn-ghost btn-ghost--mini" data-no-cooldown data-marcar-ninguno="mod-suc">Ninguno</button>
+                </div>
+                <div class="dias-apertura__checks">
+                    ${checksDiasAperturaHTML("mod-suc", suc.diasApertura)}
+                </div>
+                <p class="dias-apertura__ayuda">Desmarcá los días que la sucursal no abre.</p>
+            </div>
             <p>URL foto</p>
+            <div class="input-group">
+                <input type="file" class="form-control" id="mod-suc-fotoFile" accept="image/jpeg,image/png,image/webp,image/gif">
+            </div>
+            <p id="mod-suc-fotoStatus" style="font-size:12px;color:var(--t3);">También podés elegir una imagen de hasta 5 MB.</p>
             <div class="input-group">
                 <input type="url" class="form-control" id="mod-suc-fotoUrl" value="${suc.fotoPerfil ?? ""}">
             </div>
+            <input type="hidden" id="mod-suc-fotoPublicId">
             <hr style="border-color:var(--b);margin:20px 0;">
             <p style="font-size:13px;font-weight:600;color:var(--t);margin-bottom:10px;">Empleados</p>
             <div id="empleados-lista-modal" style="color:var(--t3);font-size:12px;">Cargando...</div>
             <div class="form-actions" style="margin-top:20px;">
                 <button class="btn-submit" id="btn-guardar-suc">Guardar</button>
-                <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+                <button class="btn-cancel">Cancelar</button>
             </div>
         </div>
     `;
+
+    const subirFotoPendiente = activarSubidaImagen("mod-suc-fotoFile", "mod-suc-fotoUrl", "mod-suc-fotoPublicId", "SUCURSAL", "mod-suc-fotoStatus");
+    div.descartarImagenPendiente = subirFotoPendiente.descartar;
+    div.querySelector(".btn-cancel").addEventListener("click", () => cerrarModal(div));
 
     try {
         const res = await fetch(API_URL + `/sucursales/${sucursalId}/empleados`, { headers: authHeaders() });
@@ -529,29 +596,46 @@ async function abrirModalModificarSucursal(sucursalId) {
         if (container) container.innerHTML = '<div style="color:var(--red);font-size:12px;">Error al cargar empleados</div>';
     }
 
+    activarDiasApertura("mod-suc", div);
+
     document.getElementById("btn-guardar-suc").addEventListener("click", async () => {
-        const body = {
-            nombre: document.getElementById("mod-suc-nombre").value || undefined,
-            direccion: document.getElementById("mod-suc-direccion").value || undefined,
-            telefono: document.getElementById("mod-suc-telefono").value || undefined,
-            descripcion: document.getElementById("mod-suc-descripcion").value || undefined,
-            horaApertura: document.getElementById("mod-suc-horaApertura").value || undefined,
-            horaCierre: document.getElementById("mod-suc-horaCierre").value || undefined,
-            fotoUrl: document.getElementById("mod-suc-fotoUrl").value || undefined,
-        };
-        try {
-            const res = await fetch(API_URL + `/sucursales/modificar/${sucursalId}`, {
-                method: "PATCH",
-                headers: authHeaders(),
-                body: JSON.stringify(body)
-            });
-            await checkRes(res);
-            const msg = await res.text();
-            alert(msg);
-            if (res.ok) { div.remove(); await cargarSucursales(); }
-        } catch (e) {
-            alert("Error: " + e.message);
+        const diasApertura = leerDiasApertura("mod-suc");
+
+        if (!diasApertura.length) {
+            alert("Tenés que marcar al menos un día de apertura");
+            return;
         }
+
+        await guardarModal(div, async () => {
+            try {
+                await subirFotoPendiente();
+                const body = {
+                    nombre: document.getElementById("mod-suc-nombre").value || undefined,
+                    direccion: document.getElementById("mod-suc-direccion").value || undefined,
+                    telefono: document.getElementById("mod-suc-telefono").value || undefined,
+                    descripcion: document.getElementById("mod-suc-descripcion").value || undefined,
+                    horaApertura: document.getElementById("mod-suc-horaApertura").value || undefined,
+                    horaCierre: document.getElementById("mod-suc-horaCierre").value || undefined,
+                    diasApertura,
+                    fotoUrl: document.getElementById("mod-suc-fotoUrl").value || undefined,
+                    fotoPublicId: document.getElementById("mod-suc-fotoPublicId").value || undefined,
+                };
+                const res = await fetch(API_URL + `/sucursales/modificar/${sucursalId}`, {
+                    method: "PATCH",
+                    headers: authHeaders(),
+                    body: JSON.stringify(body)
+                });
+                await checkResSinRedireccion(res);
+                subirFotoPendiente.confirmar();
+                const msg = await res.text();
+                alert(msg);
+                if (res.ok) { div.remove(); await cargarSucursales(); }
+            } catch (e) {
+                try { await subirFotoPendiente.descartar(); }
+                catch (limpieza) { alert(limpieza.message); }
+                alert("Error: " + e.message);
+            }
+        });
     });
 }
 
@@ -583,40 +667,56 @@ async function abrirModalModificarServicio(servicioId) {
                 </div>
                 <p>URL foto</p>
                 <div class="input-group">
+                    <input type="file" class="form-control" id="mod-serv-fotoFile" accept="image/jpeg,image/png,image/webp,image/gif">
+                </div>
+                <p id="mod-serv-fotoStatus" style="font-size:12px;color:var(--t3);">También podés elegir una imagen de hasta 5 MB.</p>
+                <div class="input-group">
                     <input type="url" class="form-control" id="mod-serv-fotoUrl" value="${s.fotoPerfil ?? ""}">
                 </div>
+                <input type="hidden" id="mod-serv-fotoPublicId">
                 <div class="form-actions">
                     <button class="btn-submit" id="btn-guardar-serv">Guardar</button>
-                    <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+                    <button class="btn-cancel">Cancelar</button>
                 </div>
             </div>
         `;
 
+        const subirFotoPendiente = activarSubidaImagen("mod-serv-fotoFile", "mod-serv-fotoUrl", "mod-serv-fotoPublicId", "SERVICIO", "mod-serv-fotoStatus");
+        div.descartarImagenPendiente = subirFotoPendiente.descartar;
+        div.querySelector(".btn-cancel").addEventListener("click", () => cerrarModal(div));
+
         document.getElementById("btn-guardar-serv").addEventListener("click", async () => {
-            const body = {
-                nombre: document.getElementById("mod-serv-nombre").value || undefined,
-                descripcion: document.getElementById("mod-serv-descripcion").value || undefined,
-                duracion: parseInt(document.getElementById("mod-serv-duracion").value) || undefined,
-                precio: parseFloat(document.getElementById("mod-serv-precio").value) || undefined,
-                fotoUrl: document.getElementById("mod-serv-fotoUrl").value || undefined,
-            };
-            try {
-                const res = await fetch(API_URL + `/servicios/modificar/${servicioId}`, {
-                    method: "PATCH",
-                    headers: authHeaders(),
-                    body: JSON.stringify(body)
-                });
-                await checkRes(res);
-                const msg = await res.text();
-                alert(msg);
-                if (res.ok) {
-                    div.remove();
-                    const sucursalId = document.getElementById("filtro-sucursal-servicios").value;
-                    if (sucursalId) await cargarServicios(sucursalId);
+            await guardarModal(div, async () => {
+                try {
+                    await subirFotoPendiente();
+                    const body = {
+                        nombre: document.getElementById("mod-serv-nombre").value || undefined,
+                        descripcion: document.getElementById("mod-serv-descripcion").value || undefined,
+                        duracion: parseInt(document.getElementById("mod-serv-duracion").value) || undefined,
+                        precio: parseFloat(document.getElementById("mod-serv-precio").value) || undefined,
+                        fotoUrl: document.getElementById("mod-serv-fotoUrl").value || undefined,
+                        fotoPublicId: document.getElementById("mod-serv-fotoPublicId").value || undefined,
+                    };
+                    const res = await fetch(API_URL + `/servicios/modificar/${servicioId}`, {
+                        method: "PATCH",
+                        headers: authHeaders(),
+                        body: JSON.stringify(body)
+                    });
+                    await checkResSinRedireccion(res);
+                    subirFotoPendiente.confirmar();
+                    const msg = await res.text();
+                    alert(msg);
+                    if (res.ok) {
+                        div.remove();
+                        const sucursalId = document.getElementById("filtro-sucursal-servicios").value;
+                        if (sucursalId) await cargarServicios(sucursalId);
+                    }
+                } catch (e) {
+                    try { await subirFotoPendiente.descartar(); }
+                    catch (limpieza) { alert(limpieza.message); }
+                    alert("Error: " + e.message);
                 }
-            } catch (e) {
-                alert("Error: " + e.message);
-            }
+            });
         });
 
     } catch (e) {
@@ -667,19 +767,42 @@ function abrirModalAgregarSucursal() {
                 <input type="time" class="form-control" id="add-suc-horaCierre" required>
             </div>
 
+            <p>Días de apertura</p>
+            <div class="dias-apertura">
+                <div class="dias-apertura__acciones">
+                    <button type="button" class="btn-ghost btn-ghost--mini" data-no-cooldown data-marcar-todos="add-suc">Todos</button>
+                    <button type="button" class="btn-ghost btn-ghost--mini" data-no-cooldown data-marcar-ninguno="add-suc">Ninguno</button>
+                </div>
+                <div class="dias-apertura__checks">
+                    ${checksDiasAperturaHTML("add-suc", DIAS_SEMANA.map(d => d.valor))}
+                </div>
+                <p class="dias-apertura__ayuda">Desmarcá los días que la sucursal no abre.</p>
+            </div>
+
             <p>URL foto de perfil</p>
+            <div class="input-group">
+                <input type="file" class="form-control" id="add-suc-fotoFile" accept="image/jpeg,image/png,image/webp,image/gif">
+            </div>
+            <p id="add-suc-fotoStatus" style="font-size:12px;color:var(--t3);">También podés subir una imagen de hasta 5 MB.</p>
             <div class="input-group">
                 <input type="url" class="form-control" placeholder="https://..." id="add-suc-fotoUrl" required>
             </div>
+            <input type="hidden" id="add-suc-fotoPublicId">
 
             <div class="form-actions">
                 <button class="btn-submit" id="btn-crear-suc">Enviar</button>
-                <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+                <button class="btn-cancel">Cancelar</button>
             </div>
         </div>
     `;
 
+    const subirFotoPendiente = activarSubidaImagen("add-suc-fotoFile", "add-suc-fotoUrl", "add-suc-fotoPublicId", "SUCURSAL", "add-suc-fotoStatus");
+    div.descartarImagenPendiente = subirFotoPendiente.descartar;
+    div.querySelector(".btn-cancel").addEventListener("click", () => cerrarModal(div));
+
     cargarCategoriasSucursal();
+
+    activarDiasApertura("add-suc", div);
 
     document.getElementById("btn-crear-suc").addEventListener("click", async (e) => {
         e.preventDefault();
@@ -691,9 +814,26 @@ function abrirModalAgregarSucursal() {
         const categoriaId = document.getElementById("add-suc-categoria").value;
         const horaApertura = document.getElementById("add-suc-horaApertura").value;
         const horaCierre = document.getElementById("add-suc-horaCierre").value;
-        const fotoUrl = document.getElementById("add-suc-fotoUrl").value;
+        const diasApertura = leerDiasApertura("add-suc");
 
-        await postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, fotoUrl, div);
+        if (!diasApertura.length) {
+            alert("Tenés que marcar al menos un día de apertura");
+            return;
+        }
+
+        try {
+            await guardarModal(div, async () => {
+                await subirFotoPendiente();
+                await postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, diasApertura,
+                    document.getElementById("add-suc-fotoUrl").value,
+                    document.getElementById("add-suc-fotoPublicId").value, div);
+                subirFotoPendiente.confirmar();
+            });
+        } catch (error) {
+            try { await subirFotoPendiente.descartar(); }
+            catch (limpieza) { alert(limpieza.message); }
+            alert("Error al guardar: " + error.message);
+        }
     });
 }
 
@@ -720,7 +860,7 @@ async function cargarCategoriasSucursal() {
     }
 }
 
-async function postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, fotoUrl, modalDiv) {
+async function postSucursal(nombre, direccion, telefono, descripcion, categoriaId, horaApertura, horaCierre, diasApertura, fotoUrl, fotoPublicId, modalDiv) {
     const datos = {
         nombre,
         direccion,
@@ -729,27 +869,24 @@ async function postSucursal(nombre, direccion, telefono, descripcion, categoriaI
         categoriaId,
         horaApertura,
         horaCierre,
-        fotoUrl
+        diasApertura,
+        fotoUrl,
+        fotoPublicId: fotoPublicId || undefined
     };
 
-    try {
-        const response = await fetch(API_URL + `/sucursales/crear`, {
+    const response = await fetch(API_URL + `/sucursales/crear`, {
             method: "POST",
             headers: authHeaders(),
             body: JSON.stringify(datos)
-        });
+    });
 
-        await checkRes(response);
-        const data = await response.text();
-        alert(data);
+    await checkResSinRedireccion(response);
+    const data = await response.text();
+    alert(data);
 
-        if (response.ok) {
-            modalDiv.remove();
-            await cargarSucursales();
-        }
-
-    } catch (error) {
-        alert("Error al guardar: " + error.message);
+    if (response.ok) {
+        modalDiv.remove();
+        await cargarSucursales();
     }
 }
 
@@ -781,15 +918,24 @@ function abrirModalAgregarServicio(sucursalId) {
 
             <p>URL foto de perfil</p>
             <div class="input-group">
+                <input type="file" class="form-control" id="add-serv-fotoFile" accept="image/jpeg,image/png,image/webp,image/gif">
+            </div>
+            <p id="add-serv-fotoStatus" style="font-size:12px;color:var(--t3);">También podés subir una imagen de hasta 5 MB.</p>
+            <div class="input-group">
                 <input type="url" class="form-control" placeholder="https://..." id="add-serv-fotoUrl" required>
             </div>
+            <input type="hidden" id="add-serv-fotoPublicId">
 
             <div class="form-actions">
                 <button class="btn-submit" id="btn-crear-serv">Enviar</button>
-                <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+                <button class="btn-cancel">Cancelar</button>
             </div>
         </div>
     `;
+
+    const subirFotoPendiente = activarSubidaImagen("add-serv-fotoFile", "add-serv-fotoUrl", "add-serv-fotoPublicId", "SERVICIO", "add-serv-fotoStatus");
+    div.descartarImagenPendiente = subirFotoPendiente.descartar;
+    div.querySelector(".btn-cancel").addEventListener("click", () => cerrarModal(div));
 
     document.getElementById("btn-crear-serv").addEventListener("click", async (e) => {
         e.preventDefault();
@@ -798,40 +944,46 @@ function abrirModalAgregarServicio(sucursalId) {
         const descripcion = document.getElementById("add-serv-descripcion").value;
         const duracion = parseInt(document.getElementById("add-serv-duracion").value);
         const precio = parseFloat(document.getElementById("add-serv-precio").value);
-        const fotoUrl = document.getElementById("add-serv-fotoUrl").value;
-
-        await postServicio(nombre, descripcion, duracion, precio, sucursalId, fotoUrl, div);
+        try {
+            await guardarModal(div, async () => {
+                await subirFotoPendiente();
+                await postServicio(nombre, descripcion, duracion, precio, sucursalId,
+                    document.getElementById("add-serv-fotoUrl").value,
+                    document.getElementById("add-serv-fotoPublicId").value, div);
+                subirFotoPendiente.confirmar();
+            });
+        } catch (error) {
+            try { await subirFotoPendiente.descartar(); }
+            catch (limpieza) { alert(limpieza.message); }
+            alert("Error al guardar: " + error.message);
+        }
     });
 }
 
-async function postServicio(nombre, descripcion, duracion, precio, sucursalId, fotoUrl, modalDiv) {
+async function postServicio(nombre, descripcion, duracion, precio, sucursalId, fotoUrl, fotoPublicId, modalDiv) {
     const datos = {
         nombre,
         descripcion,
         duracion,
         precio,
         sucursalId,
-        fotoUrl
+        fotoUrl,
+        fotoPublicId: fotoPublicId || undefined
     };
 
-    try {
-        const response = await fetch(API_URL + `/servicios/crear`, {
+    const response = await fetch(API_URL + `/servicios/crear`, {
             method: "POST",
             headers: authHeaders(),
             body: JSON.stringify(datos)
-        });
+    });
 
-        await checkRes(response);
-        const data = await response.text();
-        alert(data);
+    await checkResSinRedireccion(response);
+    const data = await response.text();
+    alert(data);
 
-        if (response.ok) {
-            modalDiv.remove();
-            await cargarServicios(sucursalId);
-        }
-
-    } catch (error) {
-        alert("Error al guardar: " + error.message);
+    if (response.ok) {
+        modalDiv.remove();
+        await cargarServicios(sucursalId);
     }
 }
 
@@ -849,7 +1001,11 @@ async function abrirModalImagenes(sucursalId) {
             <hr style="border-color:var(--b);margin:20px 0;">
             
             <h2 style="font-size:16px; margin-bottom:12px;">Agregar Imágenes</h2>
-            <p style="font-size:12px; color:var(--t3); margin-bottom:8px;">Ingresá las URLs de las imágenes</p>
+            <p style="font-size:12px; color:var(--t3); margin-bottom:8px;">Subí archivos a Cloudinary o ingresá URLs de imágenes.</p>
+            <div class="input-group">
+                <input type="file" class="form-control" id="imagenes-archivos" accept="image/jpeg,image/png,image/webp,image/gif" multiple>
+            </div>
+            <p id="imagenes-upload-status" style="font-size:12px;color:var(--t3);"></p>
             
             <div class="input-group">
                 <input type="url" class="form-control" id="input-imagen-url-1" placeholder="https://ejemplo.com/imagen1.jpg">
@@ -869,12 +1025,52 @@ async function abrirModalImagenes(sucursalId) {
             
             <div class="form-actions" style="margin-top:20px;">
                 <button class="btn-submit" id="btn-agregar-imagenes">Agregar Imágenes</button>
-                <button class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">Cerrar</button>
+                <button class="btn-cancel" id="btn-cerrar-imagenes">Cerrar</button>
             </div>
         </div>
     `;
 
     await cargarImagenesEnModal(sucursalId);
+    document.getElementById("btn-cerrar-imagenes").addEventListener("click", () => cerrarModal(div));
+
+    document.getElementById("imagenes-archivos").addEventListener("change", async (event) => {
+        const input = event.currentTarget;
+        const archivos = Array.from(input.files || []);
+        if (!archivos.length) return;
+
+        const cantidadActual = document.querySelectorAll("#imagenes-grid img").length;
+        if (cantidadActual + archivos.length > 5) {
+            alert(`Esta sucursal admite hasta 5 imágenes. Ya tiene ${cantidadActual}.`);
+            input.value = "";
+            return;
+        }
+
+        const status = document.getElementById("imagenes-upload-status");
+        await guardarModal(div, async () => {
+            try {
+                for (let indice = 0; indice < archivos.length; indice++) {
+                    status.textContent = `Subiendo imagen ${indice + 1} de ${archivos.length}…`;
+                    const datos = new FormData();
+                    datos.append("file", archivos[indice]);
+                    const headers = authHeaders();
+                    delete headers["Content-Type"];
+                    const response = await fetch(API_URL + `/sucursales/${sucursalId}/imagenes/upload`, {
+                        method: "POST",
+                        headers,
+                        body: datos
+                    });
+                    await checkResSinRedireccion(response);
+                }
+                status.textContent = "Imágenes cargadas.";
+                await cargarImagenesEnModal(sucursalId);
+            } catch (error) {
+                status.textContent = error.message;
+                await cargarImagenesEnModal(sucursalId);
+            } finally {
+                input.value = "";
+            }
+        });
+    });
 
     document.getElementById("btn-agregar-imagenes").addEventListener("click", async () => {
         const urls = [];

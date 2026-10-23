@@ -1,5 +1,7 @@
 package com.gg.turnlook.features.sucursal.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import com.gg.turnlook.features.imagen.dto.ImagenResponseDTO;
 import com.gg.turnlook.features.usuario.dto.UsuarioMiniDTO;
 import java.time.LocalDate;
@@ -24,8 +26,18 @@ public class SucursalResponseDTO {
      private String descripcion;
      private LocalDate fechaCreacion;
      private String categoria;
-     private LocalTime horaApertura;
-     private LocalTime horaCierre;
+
+    /// Las horas se devuelven como "HH:mm" para que el <input type="time"> del
+    /// formulario de edicion no mande "HH:mm:ss" de vuelta (Jackson 3 por defecto
+    /// serializa LocalTime con segundos) y el PUT sea rechazado al deserializar.
+
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime horaApertura;
+
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime horaCierre;
+
+     private List<String> diasApertura;
      private Integer puntuacion;
      private Long cantidadPuntuaciones;
      private UsuarioMiniDTO empleador;

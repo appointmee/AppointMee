@@ -1,4 +1,12 @@
-import { API_URL, authHeaders, sesionActiva, checkRes, formatearFechaLocal } from "../recursos/modulos.js";
+import {
+    API_URL,
+    authHeaders,
+    sesionActiva,
+    checkRes,
+    formatearFechaLocal,
+    resumenDiasApertura,
+    listaDiasAperturaHTML
+} from "../recursos/modulos.js";
 const IMG_FALLBACK = "https://xentra.glomastore.mx/img/sin_imagen.png";
 const user = await sesionActiva();
 if (!user) {
@@ -52,6 +60,13 @@ async function render() {
                 <div class="detalle-item">
                     <span class="detalle-label">Horario</span>
                     <span class="detalle-value">${sucursal.horaApertura} — ${sucursal.horaCierre}</span>
+                </div>
+                <div class="detalle-item detalle-item--full">
+                    <span class="detalle-label">Días de apertura</span>
+                    <span class="detalle-value detalle-value--dias">
+                        <span class="detalle-sub">${resumenDiasApertura(sucursal.diasApertura)}</span>
+                        <ul class="dias-lista">${listaDiasAperturaHTML(sucursal.diasApertura)}</ul>
+                    </span>
                 </div>
                 <div class="detalle-item">
                     <span class="detalle-label">Puntuación</span>

@@ -40,4 +40,6 @@ public class ServicioModificarDTO {
     @URL(message = "La foto de perfil debe ser una URL valida")
     private String fotoUrl;
 
+    private String fotoPublicId;
+
 }

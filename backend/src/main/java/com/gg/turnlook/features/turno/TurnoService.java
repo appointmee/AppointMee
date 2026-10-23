@@ -29,6 +29,7 @@ import java.time.LocalTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 
 
@@ -81,6 +82,10 @@ public class TurnoService {
             throw new BadRequestException("El empleado elegido no pertenece a esa sucursal");
         }
 
+        if (!servicio.getSucursal().abreElDia(turno.getFechaHora().toLocalDate().getDayOfWeek())) {
+            throw new BadRequestException("La sucursal no abre ese dia");
+        }
+
         LocalDate dia = turno.getFechaHora().toLocalDate();
         List<Turno> turnosDia = turnoRepo.findByEmpleadoAndFechaHoraBetweenAndEstadoNot(
                 empleado, dia.atStartOfDay(), dia.atTime(LocalTime.MAX), EstadoTurno.CANCELADO);
@@ -115,6 +120,12 @@ public class TurnoService {
         Map<LocalDate, List<LocalTime>> disponibilidad = new LinkedHashMap<>();
         for (int i = 0; i < 7; i++) {
             LocalDate dia = LocalDate.now().plusDays(i);
+
+            // si la sucursal no abre ese dia no hay horarios disponibles
+            if (!sucursal.abreElDia(dia.getDayOfWeek())) {
+                disponibilidad.put(dia, Collections.emptyList());
+                continue;
+            }
 
             List<Turno> turnosDia = turnosPorDia.getOrDefault(dia, Collections.emptyList());
             List<LocalTime> horariosDisponibles = new ArrayList<>();
@@ -172,7 +183,7 @@ public class TurnoService {
             throw new ForbiddenException("No tenes permisos");
         }
 
-        // ver si saco o no CONFIRMADO para ver si lo meto o no aca tmb
+        // Se conserva la regla actual: solo se cancelan turnos pendientes.
         if (turno.getEstado() != EstadoTurno.PENDIENTE) {
             throw new ConflictException("El turno no está pendiente");
         }
@@ -190,8 +201,9 @@ public class TurnoService {
             throw new ForbiddenException("No tenes permisos");
         }
 
-        // ver si dejo el estado confirmado y si si agregarlo ak tmb
-        if (turno.getEstado() != EstadoTurno.PENDIENTE) {
+        // Se admiten turnos pendientes existentes y los confirmados por el pago.
+        if (turno.getEstado() != EstadoTurno.PENDIENTE
+                && turno.getEstado() != EstadoTurno.CONFIRMADO) {
             throw new ConflictException("El turno no está pendiente");
         }
 
@@ -358,11 +370,23 @@ public class TurnoService {
     }
 
 
-    public void setearPagoRechazado(Integer turnoId) {
+    @Transactional
+    public EstadoTurno setearPagoAprobado(Integer turnoId) {
+        turnoRepo.actualizarEstadoSiEs(turnoId,
+                List.of(EstadoTurno.PENDIENTE, EstadoTurno.PAGO_RECHAZADO),
+                EstadoTurno.CONFIRMADO);
+        return listarTurnoPorId(turnoId).getEstado();
+    }
 
-        Turno turno = listarTurnoPorId(turnoId);
-        turno.setEstado(EstadoTurno.PAGO_RECHAZADO);
-        turnoRepo.save(turno);
+    @Transactional
+    public EstadoTurno setearPagoRechazado(Integer turnoId) {
+        turnoRepo.actualizarEstadoSiEs(turnoId,
+                List.of(EstadoTurno.PENDIENTE), EstadoTurno.PAGO_RECHAZADO);
+        return listarTurnoPorId(turnoId).getEstado();
+    }
+
+    public EstadoTurno verificarTurnoParaWebhook(Integer turnoId) {
+        return listarTurnoPorId(turnoId).getEstado();
     }
 
 }

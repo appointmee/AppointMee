@@ -4,11 +4,14 @@ import com.gg.turnlook.common.exception.BadRequestException;
 import com.gg.turnlook.common.exception.ConflictException;
 import com.gg.turnlook.common.exception.ForbiddenException;
 import com.gg.turnlook.common.exception.NotFoundException;
+import com.gg.turnlook.common.util.DiasSemanaUtil;
 import com.gg.turnlook.features.imagen.Imagen;
+import com.gg.turnlook.features.imagen.ImagenRepository;
 import com.gg.turnlook.features.imagen.ImagenService;
 import com.gg.turnlook.features.imagen.dto.ImagenDTO;
 import com.gg.turnlook.features.imagen.dto.ImagenResponseDTO;
 import com.gg.turnlook.features.resenia.ReseniaService;
+import com.gg.turnlook.features.resenia.ReseniaService.ResumenPuntuacion;
 import com.gg.turnlook.features.solicitud.empleado.GestionEmpleadoService;
 import com.gg.turnlook.features.sucursal.categoria.Categoria;
 import com.gg.turnlook.features.sucursal.categoria.CategoriaRepository;
@@ -28,10 +31,12 @@ import com.gg.turnlook.features.usuario.rol.Rol;
 import com.gg.turnlook.features.usuario.rol.RolService;
 import jakarta.transaction.Transactional;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 
 
@@ -43,6 +48,7 @@ public class SucursalService {
 
     private final SucursalRepository sucRepo;
     private final CategoriaRepository catRepo;
+    private final ImagenRepository imagenRepo;
     private final UsuarioService usuarioService;
     private final ImagenService imagenService;
     private final ReseniaService reseniaService;
@@ -51,9 +57,10 @@ public class SucursalService {
 
 
 
-    public SucursalService(SucursalRepository sucRepo, CategoriaRepository catRepo, UsuarioService usuarioService, ImagenService imagenService, ReseniaService reseniaService, GestionEmpleadoService gestionEmpleadoService, RolService rolService) {
+    public SucursalService(SucursalRepository sucRepo, CategoriaRepository catRepo, ImagenRepository imagenRepo, UsuarioService usuarioService, ImagenService imagenService, ReseniaService reseniaService, GestionEmpleadoService gestionEmpleadoService, RolService rolService) {
         this.sucRepo = sucRepo;
         this.catRepo = catRepo;
+        this.imagenRepo = imagenRepo;
         this.usuarioService = usuarioService;
         this.imagenService = imagenService;
         this.reseniaService = reseniaService;
@@ -93,7 +100,9 @@ public class SucursalService {
                 sucursal.getHoraApertura(), sucursal.getHoraCierre(),
                 cat, empleador);
 
-        suc.setFotoPerfil(imagenService.crearFotoPerfil(sucursal.getFotoUrl()));
+        suc.setDiasAperturaPorNombre(DiasSemanaUtil.aDias(sucursal.getDiasApertura()));
+
+        suc.setFotoPerfil(imagenService.crearFotoPerfil(sucursal.getFotoUrl(), sucursal.getFotoPublicId()));
 
         sucRepo.save(suc);
     }
@@ -132,13 +141,17 @@ public class SucursalService {
 
         if (sucursal.getHoraCierre() != null) suc.setHoraCierre(sucursal.getHoraCierre());
 
+        if (sucursal.getDiasApertura() != null) {
+            suc.setDiasAperturaPorNombre(DiasSemanaUtil.aDias(sucursal.getDiasApertura()));
+        }
+
         if (!suc.getHoraCierre().isAfter(suc.getHoraApertura())) {
             throw new BadRequestException("El horario de cierre tiene que ser posterior al de apertura");
         }
 
         // ver si valida bien como ultimo dsp
         if (sucursal.getFotoUrl() != null && !sucursal.getFotoUrl().isBlank()) {
-            imagenService.cambiarFotoPerfilSucursal(suc, sucursal.getFotoUrl());
+            imagenService.cambiarFotoPerfilSucursal(suc, sucursal.getFotoUrl(), sucursal.getFotoPublicId());
         }
 
         sucRepo.save(suc);
@@ -174,10 +187,21 @@ public class SucursalService {
         }
 
         for (String imagen : imagenes.getUrls()) {
-
             imagenService.crearImagenSucursal(sucursal, imagen);
         }
 
+    }
+
+    public ImagenResponseDTO subirImagen(Integer sucursalId, MultipartFile archivo,
+                                         String empleadorEmail) {
+        Sucursal sucursal = listarSucursalPorId(sucursalId);
+        if (!esEmpleadorAca(sucursal, empleadorEmail)) {
+            throw new ForbiddenException("No tenes permisos");
+        }
+        if (imagenService.cuantasImagenesPorSucursal(sucursal) >= 5) {
+            throw new ConflictException("Una sucursal no puede tener mas de 5 imagenes");
+        }
+        return imagenService.subirImagenSucursal(sucursal, archivo);
     }
 
 
@@ -226,14 +250,42 @@ public class SucursalService {
 
     public List<SucursalMiniDTO> listarSucursales() {
 
-        return sucRepo.findByActivoTrue().stream()
-                .map(suc -> new SucursalMiniDTO(suc.getId(), suc.getNombre(),
+        return mapearSucursalesMini(sucRepo.findByActivoTrue());
+    }
+
+
+    /// Mapea una lista de sucursales a DTOs trayendo las puntuaciones de todas
+    /// en una sola query. La categoria y la foto ya vienen cargadas por el
+    /// @EntityGraph del repository, asi que no hay queries por sucursal.
+
+    private List<SucursalMiniDTO> mapearSucursalesMini(List<Sucursal> sucursales) {
+
+        Map<Integer, ResumenPuntuacion> puntuaciones =
+                reseniaService.getPuntuacionesSucursales(
+                        sucursales.stream().map(Sucursal::getId).toList());
+
+        return sucursales.stream()
+                .map(suc -> new SucursalMiniDTO(
+                        suc.getId(), suc.getNombre(),
                         suc.getCategoria().getCategoria().name(),
                         suc.getFotoPerfil().getFotoValida(),
-                        reseniaService.getPuntuacionPromedioSucursal(suc.getId()),
-                        reseniaService.getPuntuacionesTotalesSucursal(suc.getId()))
+                        puntuacionDe(puntuaciones.get(suc.getId())),
+                        cantidadDe(puntuaciones.get(suc.getId())),
+                        DiasSemanaUtil.aNombres(suc.getDiasApertura()))
                 )
                 .toList();
+    }
+
+
+    private static Integer puntuacionDe(ResumenPuntuacion resumen) {
+
+        return resumen == null ? null : resumen.promedioRedondeado();
+    }
+
+
+    private static Long cantidadDe(ResumenPuntuacion resumen) {
+
+        return resumen == null ? 0L : resumen.cantidad();
     }
 
 
@@ -269,6 +321,8 @@ public class SucursalService {
         dto.setHoraApertura(suc.getHoraApertura());
 
         dto.setHoraCierre(suc.getHoraCierre());
+
+        dto.setDiasApertura(DiasSemanaUtil.aNombres(suc.getDiasApertura()));
 
         dto.setFotoPerfil(suc.getFotoPerfil().getFotoValida());
 
@@ -318,26 +372,13 @@ public class SucursalService {
             return listarSucursales();
         }
 
-        return sucursales.stream().map(s -> new SucursalMiniDTO(
-                        s.getId(), s.getNombre(), s.getCategoria().getCategoria().name(),
-                        s.getFotoPerfil().getFotoValida(),
-                        reseniaService.getPuntuacionPromedioSucursal(s.getId()),
-                        reseniaService.getPuntuacionesTotalesSucursal(s.getId())))
-                .toList();
+        return mapearSucursalesMini(sucursales);
     }
 
 
     public List<SucursalMiniDTO> listarSucursalesPropias(String userEmail){
 
-        return sucRepo.findSucursalesDondeEsta(userEmail)
-                .stream()
-                .map(suc -> new SucursalMiniDTO(suc.getId(), suc.getNombre(),
-                        suc.getCategoria().getCategoria().name(),
-                        suc.getFotoPerfil().getFotoValida(),
-                        reseniaService.getPuntuacionPromedioSucursal(suc.getId()),
-                        reseniaService.getPuntuacionesTotalesSucursal(suc.getId()))
-                )
-                .toList();
+        return mapearSucursalesMini(sucRepo.findSucursalesDondeEsta(userEmail));
     }
 
 
@@ -353,13 +394,44 @@ public class SucursalService {
 
         // ver si falta valid
 
-        return suc.getEmpleados().stream().
+        Set<Usuario> empleados = suc.getEmpleados();
+
+        // Las fotos y las puntuaciones de todos los empleados en una sola query
+        // cada una, en vez de tres por empleado.
+        Map<Integer, Imagen> fotos = imagenesDe(empleados);
+
+        Map<Integer, ResumenPuntuacion> puntuaciones =
+                reseniaService.getPuntuacionesEmpleados(
+                        empleados.stream().map(Usuario::getId).toList());
+
+        return empleados.stream().
                 map(emp -> new EmpleadoResponseDTO(
                         emp.getId(), emp.getNombre(), emp.getApellido(),
-                        emp.getFotoPerfil().getFotoValida(),
-                        reseniaService.getPuntuacionPromedioEmpleado(emp.getId()),
-                        reseniaService.getPuntuacionesTotalesEmpleado(emp.getId())
+                        fotos.get(emp.getId()) != null
+                                ? fotos.get(emp.getId()).getFotoValida() : null,
+                        puntuacionDe(puntuaciones.get(emp.getId())),
+                        cantidadDe(puntuaciones.get(emp.getId()))
                 )).toList();
+    }
+
+
+    /// Trae las fotos de perfil de varios usuarios en una sola query.
+    /// El id de fotoPerfil se puede leer sin cargarlo, asi que no dispara queries.
+
+    private Map<Integer, Imagen> imagenesDe(Set<Usuario> usuarios) {
+
+        List<Integer> ids = usuarios.stream()
+                .map(Usuario::getFotoPerfil)
+                .filter(Objects::nonNull)
+                .map(Imagen::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        if (ids.isEmpty()) return Map.of();
+
+        return imagenRepo.findAllById(ids).stream()
+                .collect(Collectors.toMap(Imagen::getId, img -> img, (a, b) -> a));
     }
 
 
@@ -374,9 +446,15 @@ public class SucursalService {
             throw new ForbiddenException("No tenes permisos");
         }
 
-        return suc.getEmpleados().stream().
+        Set<Usuario> empleados = suc.getEmpleados();
+
+        Map<Integer, Imagen> fotos = imagenesDe(empleados);
+
+        return empleados.stream().
                 map(u -> new UsuarioResponseDTO(u.getId(), u.getNombre(),
-                        u.getApellido(), u.getEmail(), u.getFotoPerfil().getFotoValida()))
+                        u.getApellido(), u.getEmail(),
+                        fotos.get(u.getId()) != null
+                                ? fotos.get(u.getId()).getFotoValida() : null))
                 .collect(Collectors.toSet());
     }
 

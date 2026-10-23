@@ -1,5 +1,7 @@
 package com.gg.turnlook.features.usuario;
 
+import com.gg.turnlook.common.util.DiasSemanaUtil;
+
 import com.gg.turnlook.auth.dto.LoginDTO;
 import com.gg.turnlook.common.exception.ConflictException;
 import com.gg.turnlook.common.exception.ForbiddenException;
@@ -81,7 +83,7 @@ public class UsuarioService {
                 passEncoder.encode(u.getPassword()));
 
         user.getRoles().add(rol);
-        user.setFotoPerfil(imagenService.crearFotoPerfil(u.getFotoUrl()));
+        user.setFotoPerfil(imagenService.crearFotoPerfil(u.getFotoUrl(), u.getFotoPublicId()));
 
         return usRepo.save(user);
     }
@@ -138,7 +140,7 @@ public class UsuarioService {
         if (usuario.getPassword() != null) user.setPassword(passEncoder.encode(usuario.getPassword()));
 
         if (usuario.getFotoUrl() != null && !usuario.getFotoUrl().isBlank()) {
-            imagenService.cambiarFotoPerfilUsuario(user, usuario.getFotoUrl());
+            imagenService.cambiarFotoPerfilUsuario(user, usuario.getFotoUrl(), usuario.getFotoPublicId());
         }
 
         usRepo.save(user);
@@ -219,7 +221,8 @@ public class UsuarioService {
                         suc.getCategoria().getCategoria().name(),
                         suc.getFotoPerfil().getFotoValida(),
                         reseniaService.getPuntuacionPromedioSucursal(suc.getId()),
-                        reseniaService.getPuntuacionesTotalesSucursal(suc.getId()))
+                        reseniaService.getPuntuacionesTotalesSucursal(suc.getId()),
+                        DiasSemanaUtil.aNombres(suc.getDiasApertura()))
                 )
                 .toList());
 

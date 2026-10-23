@@ -25,8 +25,11 @@ public class Imagen {
     private Integer id;
 
 
-    @Column(nullable = true)
+    @Column(nullable = true, length = 1000)
     private String url;
+
+    @Column(name = "public_id", length = 255)
+    private String publicId;
 
 
     @Column(name = "url_alt" ,nullable = false)

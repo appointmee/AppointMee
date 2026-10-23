@@ -4,6 +4,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 
 
 
@@ -21,6 +23,7 @@ public class SucursalMiniDTO {
     private String fotoPerfil;
     private Integer puntuacion;
     private Long cantidadPuntuaciones;
+    private List<String> diasApertura;
 
 }
 

@@ -3,6 +3,7 @@ package com.gg.turnlook.features.resenia;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 
 
@@ -66,6 +67,49 @@ public interface ReseniaRepository extends JpaRepository<Resenia, Integer> {
                 WHERE r.turno.empleado.id = :empleadoId
             """)
     Long puntuacionesTotalesEmpleado(Integer empleadoId);
+
+
+    /// Promedio y cantidad de resenias de varias sucursales en una sola query.
+    /// Devuelve una fila por sucursal: [sucursalId, promedio, cantidad].
+    /// El join tiene que llegar hasta la sucursal (r.turno.servicio.sucursal) y no
+    /// quedarse en el servicio, o el id devuelto seria el del servicio.
+    /// Se usa para las listas, donde consultar cada sucursal por separado
+    /// multiplicaba las queries por la cantidad de sucursales (N+1).
+
+    @Query("""
+                SELECT s.id, AVG(r.puntuacion), COUNT(r.id)
+                FROM Resenia r
+                JOIN r.turno.servicio.sucursal s
+                WHERE s.id IN :sucursalIds
+                GROUP BY s.id
+            """)
+    List<Object[]> resumenPuntuacionesPorSucursal(@Param("sucursalIds") List<Integer> sucursalIds);
+
+
+    /// Promedio y cantidad de resenias de varios servicios en una sola query.
+    /// Devuelve una fila por servicio: [servicioId, promedio, cantidad].
+
+    @Query("""
+                SELECT t.servicio.id, AVG(r.puntuacion), COUNT(r.id)
+                FROM Resenia r
+                JOIN r.turno t
+                WHERE t.servicio.id IN :servicioIds
+                GROUP BY t.servicio.id
+            """)
+    List<Object[]> resumenPuntuacionesPorServicio(@Param("servicioIds") List<Integer> servicioIds);
+
+
+    /// Promedio y cantidad de resenias de varios empleados en una sola query.
+    /// Devuelve una fila por empleado: [empleadoId, promedio, cantidad].
+
+    @Query("""
+                SELECT t.empleado.id, AVG(r.puntuacion), COUNT(r.id)
+                FROM Resenia r
+                JOIN r.turno t
+                WHERE t.empleado.id IN :empleadoIds
+                GROUP BY t.empleado.id
+            """)
+    List<Object[]> resumenPuntuacionesPorEmpleado(@Param("empleadoIds") List<Integer> empleadoIds);
 
 
 
