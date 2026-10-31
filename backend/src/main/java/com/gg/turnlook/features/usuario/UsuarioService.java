@@ -39,14 +39,20 @@ public class UsuarioService {
     private final ImagenService imagenService;
     private final ReseniaService reseniaService;
     private final PasswordEncoder passEncoder;
+    private final com.gg.turnlook.auth.refresh.RefreshTokenRepository refreshTokens;
+    private final com.gg.turnlook.auth.password.PasswordResetTokenRepository resetTokens;
+    private final com.gg.turnlook.auth.BloqueoUsuario bloqueo;
 
 
-    public UsuarioService(UsuarioRepository usRepo, RolService rolService, ImagenService imagenService, ReseniaService reseniaService, PasswordEncoder passEncoder) {
+    public UsuarioService(UsuarioRepository usRepo, RolService rolService, ImagenService imagenService, ReseniaService reseniaService, PasswordEncoder passEncoder, com.gg.turnlook.auth.refresh.RefreshTokenRepository refreshTokens, com.gg.turnlook.auth.password.PasswordResetTokenRepository resetTokens, com.gg.turnlook.auth.BloqueoUsuario bloqueo) {
         this.usRepo = usRepo;
         this.rolService = rolService;
         this.imagenService = imagenService;
         this.reseniaService = reseniaService;
         this.passEncoder = passEncoder;
+        this.refreshTokens = refreshTokens;
+        this.resetTokens = resetTokens;
+        this.bloqueo = bloqueo;
 
     }
 
@@ -54,6 +60,7 @@ public class UsuarioService {
     /// METODOS
 
 
+    @org.springframework.transaction.annotation.Transactional
     public void recuperarCuenta(LoginDTO login) {
 
         Usuario usuario = usRepo.findByEmailAndActivoFalse(login.getEmail())
@@ -63,8 +70,7 @@ public class UsuarioService {
             throw new UnauthorizedException("Credenciales incorrectas");
         }
 
-        usuario.setActivo(true);
-        usRepo.save(usuario);
+        throw new ForbiddenException("La reactivación de cuentas deshabilitadas requiere revisión administrativa");
     }
 
 
@@ -75,8 +81,11 @@ public class UsuarioService {
     }
 
 
+    @org.springframework.transaction.annotation.Transactional
     public Usuario crearUsuario(UsuarioCrearDTO u) {
 
+        u.setEmail(u.getEmail().trim().toLowerCase(java.util.Locale.ROOT));
+        if (usRepo.existsByEmail(u.getEmail())) throw new ConflictException("El email ingresado ya está en uso");
         Rol rol = rolService.listarPorRol(ERol.CLIENTE);
 
         Usuario user = new Usuario(u.getNombre(), u.getApellido(), u.getEmail(),
@@ -89,6 +98,7 @@ public class UsuarioService {
     }
 
 
+    @org.springframework.transaction.annotation.Transactional
     public void eliminarUsuario(Integer userId, String userEmail) {
 
         Usuario admin = listarUsuarioPorEmail(userEmail);
@@ -99,27 +109,33 @@ public class UsuarioService {
 
         Usuario u = listarUsuarioPorId(userId);
 
+        u = bloqueo.bloquear(u.getId());
+        revocarSesiones(u);
         u.setActivo(false);
 
         usRepo.save(u);
     }
 
 
+    @org.springframework.transaction.annotation.Transactional
     public void borrarCuentaPropia(String userEmail) {
 
         Usuario usuario = listarUsuarioPorEmail(userEmail);
 
+        usuario = bloqueo.bloquear(usuario.getId());
+        revocarSesiones(usuario);
         usuario.setActivo(false);
 
         usRepo.save(usuario);
     }
 
 
+    @org.springframework.transaction.annotation.Transactional
     public void modificarUsuario(UsuarioModificarDTO usuario, Integer userId, String userEmail) {
 
         Usuario activo = listarUsuarioPorEmail(userEmail);
 
-        Usuario user = listarUsuarioPorId(userId);
+        Usuario user = bloqueo.bloquear(userId);
 
         if (!esAdmin(activo) &&
                 !Objects.equals(activo.getId(), user.getId())) {
@@ -130,14 +146,18 @@ public class UsuarioService {
 
         if (usuario.getApellido() != null && !usuario.getApellido().isBlank()) user.setApellido(usuario.getApellido());
 
+        if (usuario.getEmail() != null) usuario.setEmail(usuario.getEmail().trim().toLowerCase(java.util.Locale.ROOT));
         if (usuario.getEmail() != null && !usuario.getEmail().equals(user.getEmail())) {
             if (usRepo.existsByEmail(usuario.getEmail())) {
                 throw new ConflictException("El email ingresado ya esta en uso");
             }
-            user.setEmail(usuario.getEmail());
+            user.setEmail(usuario.getEmail().trim().toLowerCase(java.util.Locale.ROOT));
+            revocarSesiones(user);
         }
 
-        if (usuario.getPassword() != null) user.setPassword(passEncoder.encode(usuario.getPassword()));
+        if (usuario.getPassword() != null) {
+            throw new com.gg.turnlook.common.exception.BadRequestException("Usá /auth/change-password para cambiar la contraseña");
+        }
 
         if (usuario.getFotoUrl() != null && !usuario.getFotoUrl().isBlank()) {
             imagenService.cambiarFotoPerfilUsuario(user, usuario.getFotoUrl(), usuario.getFotoPublicId());
@@ -254,6 +274,12 @@ public class UsuarioService {
                 usuario.getFotoPerfil().getFotoValida());
     }
 
+
+    private void revocarSesiones(Usuario usuario) {
+        usuario.setCredencialesVersion(usuario.getCredencialesVersion() + 1);
+        refreshTokens.revocarPorUsuario(usuario.getId());
+        resetTokens.revocarPorUsuario(usuario.getId());
+    }
 
     public boolean esAdmin(Usuario usuario) {
         Set<String> roles = setRolesComoString(usuario);

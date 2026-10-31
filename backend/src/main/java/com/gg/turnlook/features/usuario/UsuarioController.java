@@ -1,20 +1,14 @@
 package com.gg.turnlook.features.usuario;
 
 import com.gg.turnlook.auth.dto.LoginDTO;
-import com.gg.turnlook.auth.dto.LoginResponseDTO;
-import com.gg.turnlook.auth.jwt.JwtService;
-import com.gg.turnlook.features.usuario.dto.UsuarioCrearDTO;
 import com.gg.turnlook.features.usuario.dto.UsuarioEmailDTO;
 import com.gg.turnlook.features.usuario.dto.UsuarioMeDTO;
 import com.gg.turnlook.features.usuario.dto.UsuarioModificarDTO;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 
@@ -32,37 +26,17 @@ public class UsuarioController {
 
 
     private final UsuarioService usuarioService;
-    private final AuthenticationManager authenticationManager;
-    private final JwtService jwtService;
 
 
 
-    public UsuarioController(UsuarioService usuarioService, AuthenticationManager authenticationManager, JwtService jwtService) {
+    public UsuarioController(UsuarioService usuarioService) {
         this.usuarioService = usuarioService;
-        this.authenticationManager = authenticationManager;
-        this.jwtService = jwtService;
     }
 
 
 
     /// ENDPOINTS
 
-
-
-    // ver si lo muevo o lo dejo asi
-    @PostMapping("/inicio-sesion")
-    public ResponseEntity<?> iniciarSesion(@Valid @RequestBody LoginDTO login) {
-
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(login.getEmail(), login.getPass()));
-
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-
-        Usuario usuario = usuarioService.listarUsuarioPorEmail(userDetails.getUsername());
-
-        return ResponseEntity.ok().body(
-                new LoginResponseDTO(jwtService.generarToken(usuario)));
-    }
 
 
     @PostMapping("/recuperar-cuenta")
@@ -78,14 +52,6 @@ public class UsuarioController {
     public ResponseEntity<UsuarioMeDTO> getMe(@AuthenticationPrincipal String userEmail){
 
         return ResponseEntity.ok().body(usuarioService.getMe(userEmail));
-    }
-
-
-    @PostMapping("/crear")
-    public ResponseEntity<?> crearUsuario(@Valid @RequestBody UsuarioCrearDTO u) {
-
-        usuarioService.crearUsuario(u);
-        return ResponseEntity.ok().body("Se creó al usuario");
     }
 
 

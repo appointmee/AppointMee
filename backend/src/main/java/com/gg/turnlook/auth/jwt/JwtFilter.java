@@ -1,83 +1,50 @@
 package com.gg.turnlook.auth.jwt;
-
-import com.gg.turnlook.features.usuario.UsuarioRepository;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import com.gg.turnlook.features.usuario.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import jakarta.servlet.*;
+import jakarta.servlet.http.*;
 import java.io.IOException;
-import java.util.List;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-
-
-
-
-
-
-@Component
+import lombok.RequiredArgsConstructor;
+@Component @RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
-
-
     private final JwtService jwtService;
     private final UsuarioRepository usuarioRepo;
-
-
-
-    public JwtFilter(JwtService jwtService, UsuarioRepository usuarioRepo) {
-        this.jwtService = jwtService;
-        this.usuarioRepo = usuarioRepo;
-    }
-
-
-    ///  METODOS
-
-
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
-
-        String authHeader = request.getHeader("Authorization");
-
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            filterChain.doFilter(request, response);
-            return;
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws ServletException, IOException {
+        // Public credential flows must work even when the browser sends an expired access token.
+        String path = request.getServletPath();
+        if (java.util.Set.of("/auth/login", "/auth/register", "/auth/refresh", "/auth/forgot-password",
+                "/auth/reset-password", "/usuarios/inicio-sesion", "/usuarios/crear").contains(path)) {
+            chain.doFilter(request, response); return;
         }
-
-        String token = authHeader.substring(7);
-
-        String email;
+        String header = request.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) { chain.doFilter(request, response); return; }
         try {
-             email = jwtService.extraerEmail(token);
-        } catch (Exception e) {
-            filterChain.doFilter(request, response);
+            Claims claims = jwtService.validarAccessToken(header.substring(7).trim());
+            Usuario usuario = usuarioRepo.findByEmailAndActivoTrue(claims.getSubject())
+                    .orElseThrow(() -> new JwtException("Usuario no disponible"));
+            if (!usuario.getId().equals(claims.get("id", Integer.class)) ||
+                    !Integer.valueOf(usuario.getCredencialesVersion()).equals(claims.get("version", Integer.class))) {
+                throw new JwtException("Sesión revocada");
+            }
+            var roles = usuario.getRoles().stream()
+                    .map(r -> new SimpleGrantedAuthority("ROLE_" + r.getRol().name())).toList();
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken(usuario.getEmail(), null, roles));
+        } catch (JwtException | IllegalArgumentException e) {
+            SecurityContextHolder.clearContext();
+            response.setStatus(401);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write("{\"message\":\"Token inválido, vencido o revocado\"}");
             return;
         }
-
-        List<String> roles = jwtService.extraerRoles(token);
-        List<SimpleGrantedAuthority> authorities = roles.stream()
-                .map(rol -> new SimpleGrantedAuthority("ROLE_" + rol))
-                .toList();
-
-        if(jwtService.tokenValido(token)){
-
-            if(usuarioRepo.existsByEmailAndActivoFalse(email)){
-
-                response.sendError(401, "La cuenta está desactivada");
-                return;
-            }
-
-            UsernamePasswordAuthenticationToken auth =
-                    new UsernamePasswordAuthenticationToken(
-                            email, null, authorities);
-
-            SecurityContextHolder.getContext().setAuthentication(auth);
-        }
-
-        filterChain.doFilter(request, response);
+        chain.doFilter(request, response);
     }
 }

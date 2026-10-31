@@ -48,6 +48,8 @@ public class SecurityConfig {
 
         return httpSecurity
                 .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(
+                        org.springframework.security.config.http.SessionCreationPolicy.STATELESS))
                 .cors(cors ->
                         cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
@@ -75,6 +77,8 @@ public class SecurityConfig {
                                 "/turnos-folder/**",
                                 "/mis-sucursales-folder/**",
 
+                                "/auth/login", "/auth/register", "/auth/refresh",
+                                "/auth/forgot-password", "/auth/reset-password",
                                 "/usuarios/inicio-sesion",
                                 "/usuarios/recuperar-cuenta",
                                 "/usuarios/crear",

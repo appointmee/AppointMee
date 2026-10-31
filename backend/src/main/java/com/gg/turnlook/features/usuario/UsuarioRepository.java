@@ -17,6 +17,10 @@ public interface UsuarioRepository extends JpaRepository<Usuario,Integer> {
     @EntityGraph(attributePaths = "roles")
     Optional<Usuario> findByEmailAndActivoTrue(String email);
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select u from Usuario u where u.id = :id")
+    Optional<Usuario> bloquearPorId(Integer id);
+
     boolean existsByEmail(String email);
 
     Optional<Usuario> findByEmailAndActivoFalse(String email);
