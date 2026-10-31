@@ -76,9 +76,15 @@ class ImagenHttpTest {
         String cuerpo = json.writeValueAsString(Map.of(
                 "publicId", imagen.get("publicId"), "tokenCancelacion", imagen.get("tokenCancelacion")));
 
-        Usuario otro = new Usuario("Otro", "Usuario", "otro@example.com", "clave");
-        otro.setId(-1);
-        assertEquals(400, descartar(cuerpo, jwtService.generarToken(otro)).statusCode());
+        Usuario inexistente = new Usuario("Otro", "Usuario", "inexistente@example.com", "clave");
+        inexistente.setId(-1);
+        assertEquals(401, descartar(cuerpo, jwtService.generarToken(inexistente)).statusCode());
+        Usuario otro = usuarios.saveAndFlush(new Usuario("Otro", "Usuario", UUID.randomUUID() + "@example.com", "clave"));
+        try {
+            assertEquals(400, descartar(cuerpo, jwtService.generarToken(otro)).statusCode());
+        } finally {
+            usuarios.deleteById(otro.getId());
+        }
         verify(uploader, never()).destroy(any(String.class), anyMap());
         assertEquals(204, descartar(cuerpo, token).statusCode());
         verify(uploader).destroy(eq("appointmee/perfiles/foto"), anyMap());

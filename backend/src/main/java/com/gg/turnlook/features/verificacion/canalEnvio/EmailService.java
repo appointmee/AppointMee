@@ -41,12 +41,20 @@ public class EmailService implements CanalEnvioService {
                 .body(Map.of(
                         "from", remitente,
                         "to", List.of(destinatario),
-                        "subject", "RECONTRAPUTO al que le llega",
+                        "subject", "Verificación de email - Appointme",
                         "text", "Tu código de verificación es: " + codigo
                                 + "\nVence en 5 minutos."
                                 + "\nSi no lo solicitaste, ignorá este correo."
                 ))
                 .retrieve()
                 .toBodilessEntity();
+    }
+    public void enviarRecuperacion(String destinatario, String enlace, long minutos) {
+        cliente.post().uri("/emails").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("from", remitente, "to", List.of(destinatario),
+                        "subject", "Recuperar contraseña - Appointme",
+                        "text", "Restablecé tu contraseña: " + enlace + "\nVence en " + minutos
+                                + " minutos. Si no lo solicitaste, ignorá este correo."))
+                .retrieve().toBodilessEntity();
     }
 }

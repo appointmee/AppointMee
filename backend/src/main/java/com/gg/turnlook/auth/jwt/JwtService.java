@@ -24,6 +24,11 @@ public class JwtService {
 
 
 
+    @Value("${jwt.access-ttl-seconds:900}")
+    private long ttlSeconds;
+
+    public long getTtlSeconds() { return ttlSeconds; }
+
     /// METODOS
 
 
@@ -37,10 +42,12 @@ public class JwtService {
 
         return Jwts.builder()
                 .subject(usuario.getEmail())
-                .claim("id",  usuario.getId())
+                .claim("id", usuario.getId())
+                .claim("type", "access")
+                .claim("version", usuario.getCredencialesVersion())
                 .claim("roles", usuario.getRoles().stream().map(r -> r.getNombre()).toList())
                 .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + 86400000))
+                .expiration(new Date(System.currentTimeMillis() + ttlSeconds * 1000))
                 .signWith(getSignKey())
                 .compact();
     }
@@ -55,6 +62,14 @@ public class JwtService {
                 .getPayload();
     }
 
+
+    public Claims validarAccessToken(String token) {
+        Claims claims = leerTokenClaims(token);
+        if (!"access".equals(claims.get("type", String.class))) {
+            throw new io.jsonwebtoken.JwtException("Tipo de token inválido");
+        }
+        return claims;
+    }
 
     public String extraerEmail(String token){
 

@@ -39,6 +39,8 @@ public class Usuario {
     private String email;
 
     @Column(nullable = true)
+    @JsonIgnore
+    @lombok.ToString.Exclude
     private String password;
 
     @Column(name = "fecha_creacion", nullable = false)
@@ -46,6 +48,9 @@ public class Usuario {
 
     @Column(nullable = false)
     private boolean activo = true;
+
+    @Column(name = "credenciales_version", nullable = false)
+    private int credencialesVersion = 0;
 
 
 
