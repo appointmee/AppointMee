@@ -42,9 +42,10 @@ public class UsuarioService {
     private final com.gg.turnlook.auth.refresh.RefreshTokenRepository refreshTokens;
     private final com.gg.turnlook.auth.password.PasswordResetTokenRepository resetTokens;
     private final com.gg.turnlook.auth.BloqueoUsuario bloqueo;
+    private final com.gg.turnlook.features.verificacion.VerificacionRepository verificaciones;
 
 
-    public UsuarioService(UsuarioRepository usRepo, RolService rolService, ImagenService imagenService, ReseniaService reseniaService, PasswordEncoder passEncoder, com.gg.turnlook.auth.refresh.RefreshTokenRepository refreshTokens, com.gg.turnlook.auth.password.PasswordResetTokenRepository resetTokens, com.gg.turnlook.auth.BloqueoUsuario bloqueo) {
+    public UsuarioService(UsuarioRepository usRepo, RolService rolService, ImagenService imagenService, ReseniaService reseniaService, PasswordEncoder passEncoder, com.gg.turnlook.auth.refresh.RefreshTokenRepository refreshTokens, com.gg.turnlook.auth.password.PasswordResetTokenRepository resetTokens, com.gg.turnlook.auth.BloqueoUsuario bloqueo, com.gg.turnlook.features.verificacion.VerificacionRepository verificaciones) {
         this.usRepo = usRepo;
         this.rolService = rolService;
         this.imagenService = imagenService;
@@ -53,6 +54,7 @@ public class UsuarioService {
         this.refreshTokens = refreshTokens;
         this.resetTokens = resetTokens;
         this.bloqueo = bloqueo;
+        this.verificaciones = verificaciones;
 
     }
 
@@ -152,6 +154,7 @@ public class UsuarioService {
                 throw new ConflictException("El email ingresado ya esta en uso");
             }
             user.setEmail(usuario.getEmail().trim().toLowerCase(java.util.Locale.ROOT));
+            user.setEmailVerificado(false);
             revocarSesiones(user);
         }
 
@@ -279,6 +282,7 @@ public class UsuarioService {
         usuario.setCredencialesVersion(usuario.getCredencialesVersion() + 1);
         refreshTokens.revocarPorUsuario(usuario.getId());
         resetTokens.revocarPorUsuario(usuario.getId());
+        verificaciones.invalidarPorUsuario(usuario.getId(), java.time.Instant.now());
     }
 
     public boolean esAdmin(Usuario usuario) {

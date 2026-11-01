@@ -38,6 +38,9 @@ import static org.mockito.ArgumentMatchers.*;
 class AuthIntegrationTest {
     @org.springframework.boot.test.web.server.LocalServerPort int port;
     @Autowired AuthService auth;
+    @Autowired UsuarioService usuarioService;
+    @Autowired com.gg.turnlook.features.verificacion.VerificacionEmailService verificacionEmail;
+    @Autowired com.gg.turnlook.features.verificacion.VerificacionRepository codigos;
     @Autowired PasswordResetService passwords;
     @Autowired RefreshTokenRepository refreshTokens;
     @Autowired PasswordResetTokenRepository resetTokens;
@@ -50,12 +53,15 @@ class AuthIntegrationTest {
     private Usuario usuario;
     private static final String PASSWORD = "Password123!";
     @BeforeEach void preparar() {
-        usuario = usuarios.saveAndFlush(new Usuario("Ana", "Perez", UUID.randomUUID() + "@example.com", encoder.encode(PASSWORD)));
+        usuario = new Usuario("Ana", "Perez", UUID.randomUUID() + "@example.com", encoder.encode(PASSWORD));
+        usuario.setEmailVerificado(true);
+        usuario = usuarios.saveAndFlush(usuario);
     }
     @AfterEach void limpiar() {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             refreshTokens.revocarPorUsuario(usuario.getId());
             resetTokens.revocarPorUsuario(usuario.getId());
+            em.createQuery("delete from Verificacion v where v.usuario.id = :id").setParameter("id", usuario.getId()).executeUpdate();
             usuarios.deleteById(usuario.getId());
         });
     }
@@ -164,5 +170,160 @@ class AuthIntegrationTest {
         });
         assertThrows(BadRequestException.class, () -> passwords.restablecer(token, "OtraPassword123!"));
         assertTrue(encoder.matches(PASSWORD, usuarios.findById(usuario.getId()).orElseThrow().getPassword()));
+    }
+
+    private void pendiente() {
+        usuario.setEmailVerificado(false);
+        usuarios.saveAndFlush(usuario);
+    }
+
+    private String solicitarCodigo() {
+        var codigo = new AtomicReference<String>();
+        doAnswer(invocation -> { codigo.set(invocation.getArgument(1)); return null; })
+                .when(email).enviarCodigo(eq(usuario.getEmail()), anyString());
+        verificacionEmail.solicitar(usuario.getEmail());
+        return codigo.get();
+    }
+
+    private java.net.http.HttpResponse<String> post(String path, String body) throws Exception {
+        var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost:" + port + path))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer access-vencido")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body)).build();
+        return java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test void loginPendienteSoloRevelaEstadoTrasPasswordCorrecta() throws Exception {
+        pendiente();
+        var incorrecto = post("/auth/login", "{\"email\":\"" + usuario.getEmail() + "\",\"pass\":\"incorrecta\"}");
+        assertEquals(401, incorrecto.statusCode());
+        assertFalse(incorrecto.body().contains("EMAIL_NOT_VERIFIED"));
+        var correcto = post("/usuarios/inicio-sesion", "{\"email\":\"" + usuario.getEmail() + "\",\"pass\":\"" + PASSWORD + "\"}");
+        assertEquals(403, correcto.statusCode());
+        assertTrue(correcto.body().contains("EMAIL_NOT_VERIFIED"));
+        assertFalse(correcto.body().contains("refreshToken"));
+        assertTrue(refreshTokens.findByUsuarioId(usuario.getId()).isEmpty());
+    }
+
+    @Test void verificaEmailPorHttpYPermiteLoginSinSesionPrevia() throws Exception {
+        pendiente();
+        var codigo = new AtomicReference<String>();
+        doAnswer(invocation -> { codigo.set(invocation.getArgument(1)); return null; }).when(email).enviarCodigo(eq(usuario.getEmail()), anyString());
+        assertEquals(202, post("/auth/send-verification", "{\"email\":\"" + usuario.getEmail().toUpperCase() + "\"}").statusCode());
+        assertTrue(codigo.get().matches("[0-9]{6}"));
+        var registro = codigos.findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL).orElseThrow();
+        assertNotEquals(codigo.get(), registro.getCodigoHash());
+        assertTrue(encoder.matches(codigo.get(), registro.getCodigoHash()));
+        var confirmado = post("/auth/verify-email", "{\"email\":\"" + usuario.getEmail() + "\",\"codigo\":\"" + codigo.get() + "\"}");
+        assertEquals(200, confirmado.statusCode(), confirmado.body());
+        assertTrue(usuarios.findById(usuario.getId()).orElseThrow().isEmailVerificado());
+        assertNotNull(login().getRefreshToken());
+        assertThrows(BadRequestException.class, () -> verificacionEmail.confirmar(usuario.getEmail(), codigo.get()));
+    }
+
+    @Test void cincoIntentosFallidosPersistenYBloqueanElCodigoCorrecto() {
+        pendiente(); String codigo = solicitarCodigo();
+        String incorrecto = codigo.equals("000000") ? "111111" : "000000";
+        for (int i = 0; i < 5; i++) {
+            assertThrows(BadRequestException.class, () -> verificacionEmail.confirmar(usuario.getEmail(), incorrecto));
+        }
+        assertEquals(5, codigos.findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL).orElseThrow().getIntentosFallidos());
+        assertThrows(BadRequestException.class, () -> verificacionEmail.confirmar(usuario.getEmail(), codigo));
+        assertFalse(usuarios.findById(usuario.getId()).orElseThrow().isEmailVerificado());
+    }
+
+    @Test void codigoVencidoNoVerificaYNoPermiteReenviosInmediatos() {
+        pendiente(); String codigo = solicitarCodigo();
+        verificacionEmail.solicitar(usuario.getEmail());
+        verify(email, times(1)).enviarCodigo(eq(usuario.getEmail()), anyString());
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            codigos.findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL).orElseThrow().setFechaVencimiento(Instant.now().minusSeconds(1));
+        });
+        assertThrows(BadRequestException.class, () -> verificacionEmail.confirmar(usuario.getEmail(), codigo));
+    }
+
+    @Test void reenvioInvalidaElCodigoAnterior() {
+        pendiente(); String anterior = solicitarCodigo();
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            codigos.findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL).orElseThrow().setFechaCreacion(Instant.now().minusSeconds(61));
+        });
+        String nuevo = solicitarCodigo();
+        var registros = codigos.findAll().stream().filter(v -> v.getUsuario() != null && v.getUsuario().getId().equals(usuario.getId())).toList();
+        assertEquals(2, registros.size());
+        assertEquals(1, registros.stream().filter(v -> v.getFechaUso() == null).count());
+        assertNotEquals(anterior, nuevo);
+        assertThrows(BadRequestException.class, () -> verificacionEmail.confirmar(usuario.getEmail(), anterior));
+        verificacionEmail.confirmar(usuario.getEmail(), nuevo);
+        assertTrue(usuarios.findById(usuario.getId()).orElseThrow().isEmailVerificado());
+    }
+
+    @Test void envioNoRevelaCorreoInexistenteOVerificado() throws Exception {
+        var respuesta = post("/auth/send-verification", "{\"email\":\"no-existe@example.com\"}");
+        var verificado = post("/auth/send-verification", "{\"email\":\"" + usuario.getEmail() + "\"}");
+        assertEquals(202, respuesta.statusCode());
+        assertEquals(respuesta.statusCode(), verificado.statusCode());
+        assertEquals(respuesta.body(), verificado.body());
+        verify(email, never()).enviarCodigo(anyString(), anyString());
+    }
+
+    @Test void emailPendienteNoPuedeUsarJwtNiRefreshPrevios() throws Exception {
+        var sesion = login();
+        pendiente();
+        assertEquals(401, get(sesion.getToken()));
+        assertThrows(UnauthorizedException.class, () -> auth.renovar(sesion.getRefreshToken()));
+    }
+
+    @Test void codigoGenericoNoSirveComoCodigoDeCuenta() {
+        pendiente();
+        codigos.saveAndFlush(com.gg.turnlook.features.verificacion.Verificacion.builder()
+                .canal(com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL)
+                .destinatario(usuario.getEmail()).codigoHash(encoder.encode("123456"))
+                .fechaCreacion(Instant.now()).fechaVencimiento(Instant.now().plusSeconds(300))
+                .intentosFallidos(0).build());
+        try {
+            assertThrows(BadRequestException.class, () -> verificacionEmail.confirmar(usuario.getEmail(), "123456"));
+        } finally {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> em.createQuery("delete from Verificacion v where v.usuario is null and v.destinatario = :email").setParameter("email", usuario.getEmail()).executeUpdate());
+        }
+    }
+
+    @Test void registroCreaCuentaPendienteYEnviaCodigo() throws Exception {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            var rol = com.gg.turnlook.features.usuario.rol.ERol.CLIENTE;
+            if (em.createQuery("select r from Rol r where r.rol = :rol", com.gg.turnlook.features.usuario.rol.Rol.class).setParameter("rol", rol).getResultList().isEmpty()) {
+                var nuevoRol = new com.gg.turnlook.features.usuario.rol.Rol(); nuevoRol.setRol(rol); em.persist(nuevoRol);
+            }
+        });
+        String emailRegistro = UUID.randomUUID() + "@example.com";
+        var respuesta = post("/auth/register", "{\"nombre\":\"Ana\",\"apellido\":\"Perez\",\"email\":\"" + emailRegistro + "\",\"password\":\"" + PASSWORD + "\"}");
+        assertEquals(201, respuesta.statusCode(), respuesta.body());
+        var registrado = usuarios.findByEmailAndActivoTrue(emailRegistro).orElseThrow();
+        try {
+            assertFalse(registrado.isEmailVerificado());
+            assertTrue(registrado.getRoles().stream().allMatch(r -> r.getRol() == com.gg.turnlook.features.usuario.rol.ERol.CLIENTE));
+            verify(email).enviarCodigo(eq(emailRegistro), matches("[0-9]{6}"));
+            assertThrows(EmailNoVerificadoException.class, () -> auth.login(new LoginDTO(emailRegistro, PASSWORD)));
+        } finally {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                var usuarioNuevo = em.find(Usuario.class, registrado.getId());
+                var foto = usuarioNuevo.getFotoPerfil();
+                em.createQuery("delete from Verificacion v where v.usuario.id = :id").setParameter("id", usuarioNuevo.getId()).executeUpdate();
+                em.remove(usuarioNuevo); em.flush(); if (foto != null) em.remove(foto);
+            });
+        }
+    }
+
+    @Test void cambiarEmailRevocaSesionesYExigeVerificarElNuevo() {
+        var sesion = login();
+        var datos = new com.gg.turnlook.features.usuario.dto.UsuarioModificarDTO();
+        String nuevoEmail = UUID.randomUUID() + "@example.com";
+        datos.setEmail(nuevoEmail);
+        // Resolver el servicio real del contexto mantiene la transacción de modificación.
+        usuarioService.modificarUsuario(datos, usuario.getId(), usuario.getEmail());
+        var actualizado = usuarios.findById(usuario.getId()).orElseThrow();
+        assertEquals(nuevoEmail, actualizado.getEmail());
+        assertFalse(actualizado.isEmailVerificado());
+        assertThrows(UnauthorizedException.class, () -> auth.renovar(sesion.getRefreshToken()));
+        assertThrows(EmailNoVerificadoException.class, () -> auth.login(new LoginDTO(nuevoEmail, PASSWORD)));
     }
 }

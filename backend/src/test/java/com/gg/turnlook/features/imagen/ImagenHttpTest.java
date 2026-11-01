@@ -53,7 +53,9 @@ class ImagenHttpTest {
                 "secure_url", "https://res.cloudinary.com/cloud/image/upload/v123/appointmee/perfiles/foto.jpg",
                 "public_id", "appointmee/perfiles/foto"));
         when(uploader.destroy(any(String.class), anyMap())).thenReturn(Map.of("result", "ok"));
-        usuario = usuarios.saveAndFlush(new Usuario("Ana", "Pérez", UUID.randomUUID() + "@example.com", "clave"));
+        usuario = new Usuario("Ana", "Pérez", UUID.randomUUID() + "@example.com", "clave");
+        usuario.setEmailVerificado(true);
+        usuario = usuarios.saveAndFlush(usuario);
     }
 
     @AfterEach
@@ -79,7 +81,9 @@ class ImagenHttpTest {
         Usuario inexistente = new Usuario("Otro", "Usuario", "inexistente@example.com", "clave");
         inexistente.setId(-1);
         assertEquals(401, descartar(cuerpo, jwtService.generarToken(inexistente)).statusCode());
-        Usuario otro = usuarios.saveAndFlush(new Usuario("Otro", "Usuario", UUID.randomUUID() + "@example.com", "clave"));
+        Usuario otro = new Usuario("Otro", "Usuario", UUID.randomUUID() + "@example.com", "clave");
+        otro.setEmailVerificado(true);
+        otro = usuarios.saveAndFlush(otro);
         try {
             assertEquals(400, descartar(cuerpo, jwtService.generarToken(otro)).statusCode());
         } finally {

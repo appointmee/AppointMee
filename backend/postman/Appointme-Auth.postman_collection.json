@@ -2,7 +2,7 @@
   "info": {
     "name": "Appointme · Autenticación y seguridad",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Importar este JSON con Import > Files en Postman.\nREQUISITOS: ejecutar auth_tokens.sql en Supabase, iniciar el backend y configurar Resend para correos reales.\nVARIABLES: baseUrl sin barra final (por defecto http://localhost:8080), email nuevo de prueba y password. Configurarlas en Variables de esta colección, sin un environment que sobrescriba los mismos nombres.\nORDEN: ejecutar las carpetas 1 y 2 en orden. La carpeta 3 requiere intervención manual: después de solicitar el correo, copiar el token recibido en resetToken. No ejecutar toda la colección de corrido sin completar ese paso. La carpeta 4 contiene pruebas negativas.\nLos scripts guardan los tokens en variables de colección. No requieren un environment aparte. Logout revoca el refresh; el access vence normalmente. Cambiar/restablecer contraseña revoca también los access anteriores.\nLas pruebas modifican el usuario elegido y su contraseña. No usar una cuenta administrativa o ajena. No compartir una exportación con tokens o contraseñas reales. Expiración: esperar el TTL configurado para comprobar 401; no se simula vencimiento desde Postman.\nLa verificación de email por códigos es un flujo previo independiente y no se incluye en estos endpoints nuevos."
+    "description": "Importar este JSON con Import > Files en Postman.\nREQUISITOS: ejecutar auth_tokens.sql en Supabase, iniciar el backend y configurar Resend para correos reales.\nVARIABLES: baseUrl sin barra final (por defecto http://localhost:8080), email nuevo de prueba y password. Configurarlas en Variables de esta colección, sin un environment que sobrescriba los mismos nombres.\nORDEN: ejecutar las carpetas 1 y 2 en orden. La carpeta 3 requiere intervención manual: después de solicitar el correo, copiar el token recibido en resetToken. No ejecutar toda la colección de corrido sin completar ese paso. La carpeta 4 contiene pruebas negativas.\nLos scripts guardan los tokens en variables de colección. No requieren un environment aparte. Logout revoca el refresh; el access vence normalmente. Cambiar/restablecer contraseña revoca también los access anteriores.\nLas pruebas modifican el usuario elegido y su contraseña. No usar una cuenta administrativa o ajena. No compartir una exportación con tokens o contraseñas reales. Expiración: esperar el TTL configurado para comprobar 401; no se simula vencimiento desde Postman.\nLa verificación de email por códigos es un flujo previo independiente y no se incluye en estos endpoints nuevos.\nVERIFICACIÓN DE EMAIL: aplicar también email_verificacion.sql. Registro crea una cuenta pendiente y envía el código. Antes del login exitoso, completar los pasos 01b–01d y copiar manualmente el código del correo a verificationCode. Las cuentas existentes también quedan pendientes cuando se agrega la columna por primera vez. Endpoints nuevos: POST /auth/send-verification y POST /auth/verify-email."
   },
   "variable": [
     {
@@ -54,6 +54,11 @@
       "key": "invalidToken",
       "value": "token-invalido",
       "type": "string"
+    },
+    {
+      "key": "verificationCode",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -92,6 +97,126 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"HTTP 201\", function () { pm.response.to.have.status(201); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "01b · Login pendiente: dispara el modal (403)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/login",
+            "description": "La contraseña es válida, pero la cuenta recién registrada no está verificada. Responde EMAIL_NOT_VERIFIED, sin tokens.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"pass\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "01c · Solicitar o reenviar código de email",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/send-verification",
+            "description": "Registro ya envía el primer código. Reenvío espera 60 segundos y responde siempre el mismo mensaje. Copiar el código del correo en verificationCode.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "01d · Confirmar email (paso manual)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/verify-email",
+            "description": "Ingresar el código de 6 dígitos recibido por correo en verificationCode. Vence en 5 minutos; máximo 5 intentos y un solo uso.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"codigo\": \"{{verificationCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!/^[0-9]{6}$/.test(pm.collectionVariables.get(\"verificationCode\") || \"\")) { throw new Error(\"Copiá el código de seis dígitos del correo en verificationCode.\"); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
                 ]
               }
             }

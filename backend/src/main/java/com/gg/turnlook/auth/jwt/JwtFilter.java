@@ -21,7 +21,7 @@ public class JwtFilter extends OncePerRequestFilter {
         // Public credential flows must work even when the browser sends an expired access token.
         String path = request.getServletPath();
         if (java.util.Set.of("/auth/login", "/auth/register", "/auth/refresh", "/auth/forgot-password",
-                "/auth/reset-password", "/usuarios/inicio-sesion", "/usuarios/crear").contains(path)) {
+                "/auth/reset-password", "/auth/send-verification", "/auth/verify-email", "/usuarios/inicio-sesion", "/usuarios/crear").contains(path)) {
             chain.doFilter(request, response); return;
         }
         String header = request.getHeader("Authorization");
@@ -30,6 +30,7 @@ public class JwtFilter extends OncePerRequestFilter {
             Claims claims = jwtService.validarAccessToken(header.substring(7).trim());
             Usuario usuario = usuarioRepo.findByEmailAndActivoTrue(claims.getSubject())
                     .orElseThrow(() -> new JwtException("Usuario no disponible"));
+            if (!usuario.isEmailVerificado()) throw new JwtException("Email no verificado");
             if (!usuario.getId().equals(claims.get("id", Integer.class)) ||
                     !Integer.valueOf(usuario.getCredencialesVersion()).equals(claims.get("version", Integer.class))) {
                 throw new JwtException("Sesión revocada");

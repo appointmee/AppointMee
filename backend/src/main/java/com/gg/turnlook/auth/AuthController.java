@@ -13,12 +13,14 @@ public class AuthController {
     private final AuthService auth;
     private final UsuarioService usuarios;
     private final PasswordResetService passwords;
+    private final com.gg.turnlook.features.verificacion.VerificacionEmailService verificacionEmail;
     @PostMapping({"/auth/login", "/usuarios/inicio-sesion"})
     public LoginResponseDTO login(@Valid @RequestBody LoginDTO request) { return auth.login(request); }
     @PostMapping({"/auth/register", "/usuarios/crear"})
     public ResponseEntity<MessageResponse> register(@Valid @RequestBody UsuarioCrearDTO request) {
         usuarios.crearUsuario(request);
-        return ResponseEntity.status(201).body(new MessageResponse("Se creó al usuario"));
+        enviarVerificacion(request.getEmail());
+        return ResponseEntity.status(201).body(new MessageResponse("Se creó al usuario. Verificá tu email para iniciar sesión."));
     }
     @PostMapping("/auth/refresh")
     public LoginResponseDTO refresh(@Valid @RequestBody RefreshTokenRequest request) { return auth.renovar(request.refreshToken()); }
@@ -45,5 +47,26 @@ public class AuthController {
     public MessageResponse change(@AuthenticationPrincipal String email, @Valid @RequestBody ChangePasswordRequest request) {
         auth.cambiarPassword(email, request);
         return new MessageResponse("Contraseña modificada. Iniciá sesión nuevamente.");
+    }
+
+    @PostMapping("/auth/send-verification")
+    public ResponseEntity<MessageResponse> solicitarVerificacion(@Valid @RequestBody ForgotPasswordRequest request) {
+        enviarVerificacion(request.email());
+        return ResponseEntity.accepted().body(new MessageResponse(
+                "Si la cuenta está pendiente de verificación, recibirás un código por email."));
+    }
+
+    @PostMapping("/auth/verify-email")
+    public MessageResponse verificarEmail(@Valid @RequestBody VerificarEmailRequest request) {
+        verificacionEmail.confirmar(request.email(), request.codigo());
+        return new MessageResponse("Email verificado. Ya podés iniciar sesión.");
+    }
+
+    private void enviarVerificacion(String email) {
+        try {
+            verificacionEmail.solicitar(email);
+        } catch (org.springframework.web.client.RestClientException e) {
+            org.slf4j.LoggerFactory.getLogger(AuthController.class).warn("No se pudo enviar el correo de verificación");
+        }
     }
 }

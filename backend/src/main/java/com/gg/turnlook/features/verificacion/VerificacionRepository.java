@@ -7,6 +7,13 @@ import java.util.Optional;
 
 public interface VerificacionRepository  extends JpaRepository<Verificacion,Long> {
 
+    Optional<Verificacion> findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(
+            Integer usuarioId, CanalVerificacion canal);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("update Verificacion v set v.fechaUso = :ahora where v.usuario.id = :usuarioId and v.fechaUso is null")
+    void invalidarPorUsuario(Integer usuarioId, java.time.Instant ahora);
+
     Optional<Verificacion> findFirstByCanalAndDestinatarioOrderByFechaCreacionDesc(
             CanalVerificacion canal,
             String destinatario);
