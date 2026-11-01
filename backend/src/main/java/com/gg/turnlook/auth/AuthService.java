@@ -28,6 +28,11 @@ public class AuthService {
         Usuario usuario = bloqueo.bloquear(encontrado.getId());
         authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, request.getPass()));
         if (!usuario.isActivo()) throw new BadCredentialsException("Credenciales incorrectas");
+
+        // Informar el estado de verificación solo después de autenticar la contraseña.
+        if (!usuario.isEmailVerificado()) {
+            throw new com.gg.turnlook.common.exception.EmailNoVerificadoException();
+        }
         return tokens(usuario);
     }
     @Transactional

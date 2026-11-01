@@ -31,7 +31,7 @@ public class RefreshTokenService {
         Usuario usuario = bloqueo.bloquear(encontrado.getUsuario().getId());
         // Re-query by hash after the user lock: a concurrent rotation may have consumed it.
         RefreshToken actual = repository.findByTokenHash(hash).orElseThrow(RefreshTokenService::invalido);
-        if (!usuario.isActivo() || !Instant.now().isBefore(actual.getFechaVencimiento())) throw invalido();
+        if (!usuario.isActivo() || !usuario.isEmailVerificado() || !Instant.now().isBefore(actual.getFechaVencimiento())) throw invalido();
         return usuario;
     }
     public static UnauthorizedException invalido() { return new UnauthorizedException("Refresh token inválido o vencido"); }

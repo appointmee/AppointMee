@@ -20,6 +20,12 @@ public class Verificacion {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // Null en códigos genéricos; los códigos de cuenta se vinculan a su usuario.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "usuario_id")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private com.gg.turnlook.features.usuario.Usuario usuario;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable=false)
     private CanalVerificacion canal;

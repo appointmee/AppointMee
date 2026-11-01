@@ -79,6 +79,7 @@ public class SecurityConfig {
 
                                 "/auth/login", "/auth/register", "/auth/refresh",
                                 "/auth/forgot-password", "/auth/reset-password",
+                                "/auth/send-verification", "/auth/verify-email",
                                 "/usuarios/inicio-sesion",
                                 "/usuarios/recuperar-cuenta",
                                 "/usuarios/crear",
@@ -108,12 +109,15 @@ public class SecurityConfig {
         config.setAllowedOrigins(List.of(
                 "http://127.0.0.1:3000",
                 "http://localhost:3000",
+                "http://127.0.0.1:4200",
+                "http://localhost:4200",
                 "http://127.0.0.1:8080",
                 "http://localhost:8080",
                 "https://appointmee-vcs2.onrender.com"));
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        config.setExposedHeaders(List.of("Retry-After"));
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

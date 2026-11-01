@@ -29,6 +29,13 @@ public class GlobalExceptionHandler {
     }
 
 
+    @ExceptionHandler(EmailNoVerificadoException.class)
+    public ResponseEntity<?> handleEmailNoVerificado(EmailNoVerificadoException e) {
+        return ResponseEntity.status(403).body(Map.of(
+                "code", "EMAIL_NOT_VERIFIED",
+                "message", e.getMessage()));
+    }
+
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<?> handleNotFound(NotFoundException e){
         return ResponseEntity.status(404).body(e.getMessage());

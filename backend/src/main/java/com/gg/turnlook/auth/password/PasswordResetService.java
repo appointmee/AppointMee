@@ -20,7 +20,7 @@ public class PasswordResetService {
     private final PasswordEncoder encoder;
     private final EmailService email;
     @Value("${auth.password-reset-ttl-seconds:900}") private long ttl;
-    @Value("${auth.password-reset-url:http://localhost:3000/reset-password}") private String resetUrl;
+    @Value("${auth.password-reset-url:http://localhost:4200/reset-password}") private String resetUrl;
     @Transactional
     public void solicitar(String destinatario) {
         usuarios.findByEmailAndActivoTrue(destinatario.trim().toLowerCase(Locale.ROOT)).ifPresent(encontrado -> {
