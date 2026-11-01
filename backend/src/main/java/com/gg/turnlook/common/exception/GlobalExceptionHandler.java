@@ -16,6 +16,11 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 public class GlobalExceptionHandler {
 
 
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<?> handleJsonInvalido(Exception e) {
+        return ResponseEntity.badRequest().body(Map.of("message", "La solicitud no tiene un formato válido"));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<?> manejarErroresValidacion(MethodArgumentNotValidException ex) {
 
@@ -33,7 +38,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<?> handleEmailNoVerificado(EmailNoVerificadoException e) {
         return ResponseEntity.status(403).body(Map.of(
                 "code", "EMAIL_NOT_VERIFIED",
-                "message", e.getMessage()));
+                "message", e.getMessage(),
+                "verificationToken", e.getVerificationToken(),
+                "verificationExpiresIn", 900));
+    }
+
+    @ExceptionHandler(CodigoVerificacionException.class)
+    public ResponseEntity<?> handleCodigoVerificacion(CodigoVerificacionException e) {
+        return ResponseEntity.status("EMAIL_ALREADY_VERIFIED".equals(e.getCode()) ? 409 : 400).body(Map.of(
+                "code", e.getCode(), "message", e.getMessage(),
+                "attemptsRemaining", e.getEstado().attemptsRemaining(),
+                "retryAfterSeconds", e.getEstado().retryAfterSeconds()));
     }
 
     @ExceptionHandler(NotFoundException.class)

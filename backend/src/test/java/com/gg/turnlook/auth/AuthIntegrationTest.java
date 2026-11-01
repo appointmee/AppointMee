@@ -38,6 +38,7 @@ import static org.mockito.ArgumentMatchers.*;
 class AuthIntegrationTest {
     @org.springframework.boot.test.web.server.LocalServerPort int port;
     @Autowired AuthService auth;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean RefreshTokenService emisorRefresh;
     @Autowired UsuarioService usuarioService;
     @Autowired com.gg.turnlook.features.verificacion.VerificacionEmailService verificacionEmail;
     @Autowired com.gg.turnlook.features.verificacion.VerificacionRepository codigos;
@@ -185,11 +186,20 @@ class AuthIntegrationTest {
         return codigo.get();
     }
 
+    private String ticket() {
+        return jwt.generarTokenVerificacion(usuarios.findById(usuario.getId()).orElseThrow());
+    }
+
     private java.net.http.HttpResponse<String> post(String path, String body) throws Exception {
-        var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost:" + port + path))
+        return postConAcceso(path, body, path.contains("verification") || path.equals("/auth/verify-email") ? ticket() : null);
+    }
+
+    private java.net.http.HttpResponse<String> postConAcceso(String path, String body, String acceso) throws Exception {
+        var builder = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost:" + port + path))
                 .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer access-vencido")
-                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body)).build();
+                .header("Authorization", "Bearer access-vencido");
+        if (acceso != null) builder.header("X-Verification-Token", acceso);
+        var request = builder.POST(java.net.http.HttpRequest.BodyPublishers.ofString(body)).build();
         return java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
     }
 
@@ -260,9 +270,8 @@ class AuthIntegrationTest {
     @Test void envioNoRevelaCorreoInexistenteOVerificado() throws Exception {
         var respuesta = post("/auth/send-verification", "{\"email\":\"no-existe@example.com\"}");
         var verificado = post("/auth/send-verification", "{\"email\":\"" + usuario.getEmail() + "\"}");
-        assertEquals(202, respuesta.statusCode());
-        assertEquals(respuesta.statusCode(), verificado.statusCode());
-        assertEquals(respuesta.body(), verificado.body());
+        assertEquals(401, respuesta.statusCode());
+        assertEquals(202, verificado.statusCode());
         verify(email, never()).enviarCodigo(anyString(), anyString());
     }
 
@@ -325,5 +334,153 @@ class AuthIntegrationTest {
         assertFalse(actualizado.isEmailVerificado());
         assertThrows(UnauthorizedException.class, () -> auth.renovar(sesion.getRefreshToken()));
         assertThrows(EmailNoVerificadoException.class, () -> auth.login(new LoginDTO(nuevoEmail, PASSWORD)));
+    }
+
+    @Test void verificarEmailIniciaSesionYElCodigoNoSePuedeReutilizar() throws Exception {
+        pendiente(); String codigo = solicitarCodigo();
+        var respuesta = post("/auth/verify-email", "{\"email\":\"" + usuario.getEmail() + "\",\"codigo\":\"" + codigo + "\"}");
+        assertEquals(200, respuesta.statusCode(), respuesta.body());
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(respuesta.body());
+        assertEquals(usuario.getId(), json.get("usuario").get("id").asInt());
+        String access = json.get("accessToken").asText();
+        assertEquals(usuario.getId(), jwt.validarAccessToken(access).get("id", Integer.class));
+        assertNotNull(auth.renovar(json.get("refreshToken").asText()));
+        assertEquals(409, post("/auth/verify-email", "{\"email\":\"" + usuario.getEmail() + "\",\"codigo\":\"" + codigo + "\"}").statusCode());
+    }
+
+    @Test void primerReenvioEsA15SegundosYElSiguienteA60() {
+        pendiente(); solicitarCodigo();
+        verificacionEmail.solicitar(usuario.getEmail());
+        verify(email, times(1)).enviarCodigo(eq(usuario.getEmail()), anyString());
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> codigos
+                .findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL)
+                .orElseThrow().setFechaCreacion(Instant.now().minusSeconds(16)));
+        verificacionEmail.solicitar(usuario.getEmail());
+        verify(email, times(2)).enviarCodigo(eq(usuario.getEmail()), anyString());
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> codigos
+                .findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL)
+                .orElseThrow().setFechaCreacion(Instant.now().minusSeconds(16)));
+        verificacionEmail.solicitar(usuario.getEmail());
+        verify(email, times(2)).enviarCodigo(eq(usuario.getEmail()), anyString());
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> em.createQuery(
+                "update Verificacion v set v.fechaCreacion = :fecha where v.usuario.id = :id")
+                .setParameter("fecha", Instant.now().minusSeconds(61)).setParameter("id", usuario.getId()).executeUpdate());
+        verificacionEmail.solicitar(usuario.getEmail());
+        verify(email, times(3)).enviarCodigo(eq(usuario.getEmail()), anyString());
+    }
+
+    @Test void intentosFallidosDesdeElControllerTambienPersisten() throws Exception {
+        pendiente(); String codigo = solicitarCodigo();
+        String incorrecto = codigo.equals("000000") ? "111111" : "000000";
+        for (int i = 0; i < 5; i++) {
+            assertEquals(400, post("/auth/verify-email", "{\"email\":\"" + usuario.getEmail() + "\",\"codigo\":\"" + incorrecto + "\"}").statusCode());
+        }
+        assertEquals(5, codigos.findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL).orElseThrow().getIntentosFallidos());
+        assertThrows(BadRequestException.class, () -> auth.verificarEmail(usuario.getEmail(), codigo, ticket()));
+        assertTrue(refreshTokens.findByUsuarioId(usuario.getId()).isEmpty());
+    }
+
+    @Test void verificacionExigeCredencialesPreviasYElTicketNoSirveParaUsarLaApi() throws Exception {
+        pendiente();
+        String cuerpo = "{\"email\":\"" + usuario.getEmail() + "\"}";
+        assertEquals(401, postConAcceso("/auth/verification-status", cuerpo, null).statusCode());
+        assertEquals(401, postConAcceso("/auth/send-verification", cuerpo, "falso").statusCode());
+        assertEquals(401, postConAcceso("/auth/send-verification", cuerpo, jwt.generarToken(usuario)).statusCode());
+        var login = postConAcceso("/auth/login", "{\"email\":\"" + usuario.getEmail() + "\",\"pass\":\"" + PASSWORD + "\"}", null);
+        assertEquals(403, login.statusCode());
+        String acceso = new com.fasterxml.jackson.databind.ObjectMapper().readTree(login.body()).get("verificationToken").asText();
+        assertEquals(200, postConAcceso("/auth/verification-status", cuerpo, acceso).statusCode());
+        assertEquals(401, get(acceso));
+        assertEquals(401, postConAcceso("/auth/send-verification", "{\"email\":\"otro@example.com\"}", acceso).statusCode());
+        assertEquals(400, postConAcceso("/auth/complete-verification", cuerpo, acceso).statusCode());
+    }
+
+    @Test void recargarOVolverAlFlujoNoInvalidaElCodigoYElRelojVieneDelServidor() throws Exception {
+        pendiente(); String codigo = solicitarCodigo();
+        var status = new com.fasterxml.jackson.databind.ObjectMapper().readTree(post("/auth/verification-status", "{\"email\":\"" + usuario.getEmail() + "\"}").body());
+        assertTrue(status.get("enviado").asBoolean());
+        assertTrue(status.get("retryAfterSeconds").asLong() > 0);
+        assertTrue(status.get("retryAfterSeconds").asLong() <= 15);
+        var inicio = post("/auth/send-verification", "{\"email\":\"" + usuario.getEmail() + "\",\"reenviar\":false}");
+        assertEquals(202, inicio.statusCode());
+        assertFalse(new com.fasterxml.jackson.databind.ObjectMapper().readTree(inicio.body()).get("enviadoAhora").asBoolean());
+        verify(email, times(1)).enviarCodigo(eq(usuario.getEmail()), anyString());
+        assertEquals(200, post("/auth/verify-email", "{\"email\":\"" + usuario.getEmail() + "\",\"codigo\":\"" + codigo + "\"}").statusCode());
+    }
+
+    @Test void unReenvioAntesDeTiempoNoDiceQueEnvioYConservaElCodigoValido() throws Exception {
+        pendiente(); String codigo = solicitarCodigo();
+        var envio = post("/auth/send-verification", "{\"email\":\"" + usuario.getEmail() + "\",\"reenviar\":true}");
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(envio.body());
+        assertEquals(202, envio.statusCode()); assertFalse(json.get("enviadoAhora").asBoolean());
+        assertTrue(json.get("retryAfterSeconds").asLong() > 0);
+        verify(email, times(1)).enviarCodigo(eq(usuario.getEmail()), anyString());
+        verificacionEmail.confirmar(usuario.getEmail(), codigo);
+    }
+
+    @Test void falloDelProveedorNoInvalidaCodigoAnteriorNiSeOcultaConUn202() throws Exception {
+        pendiente(); String codigo = solicitarCodigo();
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> codigos
+                .findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL)
+                .orElseThrow().setFechaCreacion(Instant.now().minusSeconds(61)));
+        doThrow(new org.springframework.web.client.RestClientException("Proveedor no disponible")).when(email).enviarCodigo(eq(usuario.getEmail()), anyString());
+        assertEquals(503, post("/auth/send-verification", "{\"email\":\"" + usuario.getEmail() + "\",\"reenviar\":true}").statusCode());
+        verificacionEmail.confirmar(usuario.getEmail(), codigo);
+        assertTrue(usuarios.findById(usuario.getId()).orElseThrow().isEmailVerificado());
+    }
+
+    @Test void respuestaPerdidaSeRecuperaConElMismoTicketSinReutilizarElCodigo() throws Exception {
+        pendiente(); String codigo = solicitarCodigo(); String acceso = ticket();
+        String cuerpo = "{\"email\":\"" + usuario.getEmail() + "\"}";
+        assertEquals(200, postConAcceso("/auth/verify-email", "{\"email\":\"" + usuario.getEmail() + "\",\"codigo\":\"" + codigo + "\"}", acceso).statusCode());
+        var estado = postConAcceso("/auth/verification-status", cuerpo, acceso);
+        assertTrue(new com.fasterxml.jackson.databind.ObjectMapper().readTree(estado.body()).get("verificada").asBoolean());
+        var completo = postConAcceso("/auth/complete-verification", cuerpo, acceso);
+        assertEquals(200, completo.statusCode());
+        assertTrue(completo.body().contains("refreshToken"));
+        assertEquals(409, postConAcceso("/auth/verify-email", "{\"email\":\"" + usuario.getEmail() + "\",\"codigo\":\"" + codigo + "\"}", acceso).statusCode());
+    }
+
+    @Test void contadorDeIntentosYLímiteSeInformanConElEstadoReal() throws Exception {
+        pendiente(); String codigo = solicitarCodigo();
+        String mal = codigo.equals("000000") ? "111111" : "000000";
+        for (int intento = 1; intento <= 5; intento++) {
+            var respuesta = post("/auth/verify-email", "{\"email\":\"" + usuario.getEmail() + "\",\"codigo\":\"" + mal + "\"}");
+            var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(respuesta.body());
+            assertEquals(400, respuesta.statusCode()); assertEquals(5 - intento, json.get("attemptsRemaining").asInt());
+            if (intento == 5) assertEquals("VERIFICATION_ATTEMPTS_EXCEEDED", json.get("code").asText());
+        }
+        assertFalse(usuarios.findById(usuario.getId()).orElseThrow().isEmailVerificado());
+    }
+
+    @Test void falloAlCrearSesionNoDejaEmailVerificadoNiCodigoConsumido() {
+        pendiente(); String codigo = solicitarCodigo(); String acceso = ticket();
+        doThrow(new BadRequestException("No se pudo crear la sesión")).when(emisorRefresh).emitir(any(Usuario.class));
+        assertThrows(BadRequestException.class, () -> auth.verificarEmail(usuario.getEmail(), codigo, acceso));
+        assertFalse(usuarios.findById(usuario.getId()).orElseThrow().isEmailVerificado());
+        assertNull(codigos.findFirstByUsuarioIdAndCanalOrderByFechaCreacionDescIdDesc(usuario.getId(), com.gg.turnlook.features.verificacion.enums.CanalVerificacion.EMAIL).orElseThrow().getFechaUso());
+        assertTrue(refreshTokens.findByUsuarioId(usuario.getId()).isEmpty());
+    }
+
+    @Test void ticketVencidoOCredencialesCambiadasNoPermitenVerificar() throws Exception {
+        pendiente(); String cuerpo = "{\"email\":\"" + usuario.getEmail() + "\"}";
+        String vencido = io.jsonwebtoken.Jwts.builder().subject(usuario.getEmail()).claim("id", usuario.getId())
+                .claim("version", usuario.getCredencialesVersion()).claim("type", "email-verification")
+                .expiration(new java.util.Date(System.currentTimeMillis() - 1000))
+                .signWith(io.jsonwebtoken.security.Keys.hmacShaKeyFor("local-test-secret-only-32-characters-minimum".getBytes(java.nio.charset.StandardCharsets.UTF_8))).compact();
+        assertEquals(401, postConAcceso("/auth/verification-status", cuerpo, vencido).statusCode());
+        String acceso = ticket();
+        usuario.setCredencialesVersion(usuario.getCredencialesVersion() + 1); usuarios.saveAndFlush(usuario);
+        assertEquals(401, postConAcceso("/auth/verification-status", cuerpo, acceso).statusCode());
+    }
+
+    @Test void unEmailAnteriorNoBloqueaElEnvioParaElEmailNuevo() {
+        pendiente(); solicitarCodigo();
+        String nuevoEmail = UUID.randomUUID() + "@example.com";
+        var datos = new com.gg.turnlook.features.usuario.dto.UsuarioModificarDTO(); datos.setEmail(nuevoEmail);
+        usuarioService.modificarUsuario(datos, usuario.getId(), usuario.getEmail());
+        var respuesta = verificacionEmail.solicitarConAcceso(nuevoEmail, ticket(), false);
+        assertTrue(respuesta.enviadoAhora());
+        verify(email).enviarCodigo(eq(nuevoEmail), anyString());
     }
 }
