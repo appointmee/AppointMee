@@ -79,7 +79,7 @@ public class SecurityConfig {
 
                                 "/auth/login", "/auth/register", "/auth/refresh",
                                 "/auth/forgot-password", "/auth/reset-password",
-                                "/auth/send-verification", "/auth/verify-email",
+                                "/auth/send-verification", "/auth/verify-email", "/auth/verification-status", "/auth/complete-verification",
                                 "/usuarios/inicio-sesion",
                                 "/usuarios/recuperar-cuenta",
                                 "/usuarios/crear",

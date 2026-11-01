@@ -21,6 +21,8 @@ public class AuthService {
     private final RefreshTokenRepository refreshRepository;
     private final PasswordResetTokenRepository resetRepository;
     private final PasswordEncoder encoder;
+    private final com.gg.turnlook.features.verificacion.VerificacionEmailService verificacionEmail;
+    private final com.gg.turnlook.features.verificacion.VerificacionAccesoService accesoVerificacion;
     @Transactional
     public LoginResponseDTO login(LoginDTO request) {
         String email = request.getEmail().trim().toLowerCase(Locale.ROOT);
@@ -31,10 +33,31 @@ public class AuthService {
 
         // Informar el estado de verificación solo después de autenticar la contraseña.
         if (!usuario.isEmailVerificado()) {
-            throw new com.gg.turnlook.common.exception.EmailNoVerificadoException();
+            throw new com.gg.turnlook.common.exception.EmailNoVerificadoException(jwt.generarTokenVerificacion(usuario));
         }
         return tokens(usuario);
     }
+    @Transactional(noRollbackFor = com.gg.turnlook.common.exception.CodigoVerificacionException.class)
+    public VerificacionEmailResponse verificarEmail(String email, String codigo, String ticket) {
+        verificacionEmail.confirmarConAcceso(email, codigo, ticket);
+        return completarVerificacion(email, ticket);
+    }
+
+    @Transactional
+    public VerificacionEmailResponse completarVerificacion(String email, String ticket) {
+        Usuario usuario = accesoVerificacion.validar(email, ticket);
+        if (!usuario.isEmailVerificado()) throw new com.gg.turnlook.common.exception.BadRequestException("La cuenta todavía no está verificada");
+        LoginResponseDTO sesion = tokens(usuario);
+
+        var perfil = new com.gg.turnlook.features.usuario.dto.UsuarioMeDTO(
+                usuario.getId(),
+                usuario.getRoles().stream().map(r -> r.getRol().name()).collect(java.util.stream.Collectors.toSet()),
+                usuario.getFotoPerfil() == null ? null : usuario.getFotoPerfil().getFotoValida());
+
+        return new VerificacionEmailResponse("Tu cuenta fue verificada correctamente.",
+                sesion.getToken(), sesion.getToken(), sesion.getRefreshToken(), sesion.getExpiresIn(), perfil);
+    }
+
     @Transactional
     public LoginResponseDTO renovar(String token) { return tokens(refresh.validar(token)); }
     private LoginResponseDTO tokens(Usuario usuario) {

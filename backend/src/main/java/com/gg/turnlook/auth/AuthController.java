@@ -49,17 +49,32 @@ public class AuthController {
         return new MessageResponse("Contraseña modificada. Iniciá sesión nuevamente.");
     }
 
+    @PostMapping("/auth/verification-status")
+    public EstadoVerificacionResponse estadoVerificacion(@Valid @RequestBody ForgotPasswordRequest request,
+            @RequestHeader(value = "X-Verification-Token", required = false) String ticket) {
+        return verificacionEmail.consultarEstado(request.email(), ticket);
+    }
+
     @PostMapping("/auth/send-verification")
-    public ResponseEntity<MessageResponse> solicitarVerificacion(@Valid @RequestBody ForgotPasswordRequest request) {
-        enviarVerificacion(request.email());
-        return ResponseEntity.accepted().body(new MessageResponse(
-                "Si la cuenta está pendiente de verificación, recibirás un código por email."));
+    public ResponseEntity<?> solicitarVerificacion(@Valid @RequestBody SolicitarVerificacionEmailRequest request,
+            @RequestHeader(value = "X-Verification-Token", required = false) String ticket) {
+        try {
+            return ResponseEntity.accepted().body(verificacionEmail.solicitarConAcceso(request.email(), ticket, Boolean.TRUE.equals(request.reenviar())));
+        } catch (org.springframework.web.client.RestClientException e) {
+            return ResponseEntity.status(503).body(new MessageResponse("No pudimos enviar el código. Intentá nuevamente."));
+        }
     }
 
     @PostMapping("/auth/verify-email")
-    public MessageResponse verificarEmail(@Valid @RequestBody VerificarEmailRequest request) {
-        verificacionEmail.confirmar(request.email(), request.codigo());
-        return new MessageResponse("Email verificado. Ya podés iniciar sesión.");
+    public VerificacionEmailResponse verificarEmail(@Valid @RequestBody VerificarEmailRequest request,
+            @RequestHeader(value = "X-Verification-Token", required = false) String ticket) {
+        return auth.verificarEmail(request.email(), request.codigo(), ticket);
+    }
+
+    @PostMapping("/auth/complete-verification")
+    public VerificacionEmailResponse completarVerificacion(@Valid @RequestBody ForgotPasswordRequest request,
+            @RequestHeader(value = "X-Verification-Token", required = false) String ticket) {
+        return auth.completarVerificacion(request.email(), ticket);
     }
 
     private void enviarVerificacion(String email) {

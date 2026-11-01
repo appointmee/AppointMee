@@ -63,6 +63,26 @@ public class JwtService {
     }
 
 
+    public String generarTokenVerificacion(Usuario usuario) {
+        return Jwts.builder()
+                .subject(usuario.getEmail())
+                .claim("id", usuario.getId())
+                .claim("version", usuario.getCredencialesVersion())
+                .claim("type", "email-verification")
+                .id(java.util.UUID.randomUUID().toString())
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + 900_000))
+                .signWith(getSignKey()).compact();
+    }
+
+    public Claims validarTokenVerificacion(String token) {
+        Claims claims = leerTokenClaims(token);
+        if (!"email-verification".equals(claims.get("type", String.class))) {
+            throw new io.jsonwebtoken.JwtException("Tipo de token inválido");
+        }
+        return claims;
+    }
+
     public Claims validarAccessToken(String token) {
         Claims claims = leerTokenClaims(token);
         if (!"access".equals(claims.get("type", String.class))) {

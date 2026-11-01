@@ -1,39 +1,35 @@
-# Verificación de email en el backend
+# Flujo de verificación de cuenta
 
-## Activación en Supabase
+## Acceso y despliegue
 
-Ejecutar `src/main/resources/db/email_verificacion.sql` después de `auth_tokens.sql`, antes de iniciar esta versión. Mantiene `ddl-auto=validate`. El script agrega `usuarios.email_verificado` y vincula los códigos de la tabla `verificacion` a un `usuario_id`. Si esa tabla no existe, la crea. No elimina datos.
+Actualizar frontend y backend juntos. No requiere SQL nuevo si ya se aplicaron auth_tokens.sql y email_verificacion.sql. No se modifica automáticamente ninguna cuenta existente ni se desmarca un email ya verificado.
 
-La primera ejecución deja las cuentas existentes pendientes de verificación, igual que las nuevas. Repetir el script no vuelve a poner en pendiente una cuenta ya verificada. Los códigos genéricos antiguos, sin usuario asociado, no pueden verificar cuentas. Las tablas requieren acceso desde la conexión PostgreSQL del backend; se bloquea su acceso público por roles anon/authenticated.
+1. Login con contraseña incorrecta, usuario inexistente o desactivado: 401 genérico.
+2. Login con contraseña correcta y email pendiente: 403 EMAIL_NOT_VERIFIED con verificationToken y verificationExpiresIn=900.
+3. Angular guarda el email y ese permiso limitado en sessionStorage. No guarda contraseña ni código OTP, ni los coloca en URLs.
+4. `/configuracion/verificar-email` tiene verificationGuard: exige ese contexto y lo valida con el backend. Escribir la URL o un email en sessionStorage no basta.
 
-Configurar `RESEND_API_KEY` y `RESEND_FROM` para enviar correos. No se usa Supabase Auth ni se ejecuta la migración automáticamente. La aplicación usa el proveedor Resend existente.
+El permiso está firmado, vence a los 15 minutos y se vincula a ID, email y versión de credenciales. No sirve como access token ni refresh. Cambiar contraseña o email o desactivar la cuenta invalida su uso.
 
-## Contrato para Angular
+## Contrato
 
-- `POST /auth/register` y su alias `/usuarios/crear`: crean un CLIENTE activo, con email sin verificar, e intentan enviar el código automáticamente. Respuesta 201.
-- `POST /auth/login` y su alias `/usuarios/inicio-sesion`: contraseña incorrecta, cuenta inexistente o desactivada reciben 401 genérico. Solo con contraseña correcta y email pendiente se responde **403** con `{"code":"EMAIL_NOT_VERIFIED","message":"Verificá tu email para iniciar sesión"}`. No se emite ningún token. Esto activa el modal de Angular.
-- `POST /auth/send-verification`: cuerpo `{"email":"usuario@example.com"}`. Público, sin Bearer. Responde **202** con mensaje genérico para cuentas pendientes, verificadas, inexistentes, cooldown y fallos HTTP del proveedor. Un 202 no garantiza entrega de correo.
-- `POST /auth/verify-email`: cuerpo `{"email":"usuario@example.com","codigo":"123456"}`. Público, sin Bearer. Éxito **200**: marca email verificado y consume el código; el usuario puede iniciar sesión. Código inválido/vencido/usado o intentos agotados: **400** genérico.
+Todos estos endpoints reciben `X-Verification-Token` con el permiso del login. No requieren una sesión completa porque aún se está verificando la cuenta.
 
-Los emails se normalizan con trim y minúsculas. No se aceptan códigos de otro usuario, de otro email o del flujo genérico previo. No se marca una cuenta como verificada al restablecer la contraseña.
+- POST /auth/verification-status, cuerpo {"email":"..."}: verificada, enviado, enviadoAhora, retryAfterSeconds, attemptsRemaining, expiresInSeconds.
+- POST /auth/send-verification, cuerpo {"email":"...","reenviar":false}: conserva un código vigente. Con reenviar=true pide otro si el servidor permite el reenvío. Devuelve 202 y el estado real; enviadoAhora=false significa que NO se emitió un código nuevo. Un fallo HTTP de Resend devuelve 503 y revierte la generación, conservando el código anterior.
+- POST /auth/verify-email, cuerpo {"email":"...","codigo":"123456"}: confirma y crea sesión en una transacción. Devuelve message, token/accessToken, refreshToken, expiresIn y usuario. Si falla crear la sesión, no quedan confirmación ni consumo de código parcialmente guardados.
+- POST /auth/complete-verification, cuerpo {"email":"..."}: recupera la sesión si el servidor ya confirmó el email pero se perdió la respuesta. Exige el permiso previo del login y que la cuenta esté realmente verificada; no reutiliza el OTP.
 
-## Códigos y sesiones
+Los errores de código responden con VERIFICATION_CODE_INVALID, VERIFICATION_CODE_EXPIRED o VERIFICATION_ATTEMPTS_EXCEEDED, attemptsRemaining y retryAfterSeconds. Una cuenta ya confirmada devuelve 409 EMAIL_ALREADY_VERIFIED. No se incluye el código en mensajes ni URLs.
 
-Código aleatorio de 6 dígitos, hash BCrypt en la base, 5 minutos de vigencia, máximo 5 intentos incorrectos persistidos. Mínimo 60 segundos entre envíos; reenvío invalida el código anterior. Los bloqueos por usuario serializan las operaciones concurrentes. Solo se muestra el estado sin verificar después de validar credenciales; los mensajes de envío no revelan existencia de cuenta, sin promesa de tiempo de respuesta constante.
+## Correcciones de estado y reenvío
 
-JWT y refresh verifican también que el email esté confirmado. Cambiar email vuelve a dejar la cuenta pendiente y revoca sesiones y códigos anteriores. La baja también invalida códigos. `activo` y `emailVerificado` son estados distintos.
+El primer reenvío tiene espera de 15 segundos; los siguientes, 60. La base conserva el historial: volver al login no reinicia el reloj del servidor. Angular muestra los segundos informados por el backend, no un contador independiente. Recargar conserva el código vigente; solo un reenvío efectivo reemplaza el anterior. Después de reenviar usar el último correo.
 
-## Probar
+La confirmación y la emisión de sesión son atómicas. El cliente valida la respuesta completa antes de guardar tokens o marcar autenticación. Ante una respuesta perdida o incompleta consulta el estado real y recupera la sesión si ya se confirmó. Cancelar el flujo evita que respuestas tardías revivan una sesión en el navegador.
 
-Importar la colección actualizada en `postman/Appointme-Auth.postman_collection.json`.
+El registro sigue intentando enviar el primer código. El envío automático de la pantalla solo hace falta si no hay un código vigente y la espera del servidor lo permite. Un 202 no garantiza entrega final del proveedor, pero enviadoAhora distingue generación efectiva de cooldown. No se ignoran los fallos HTTP del proveedor durante los reenvíos autorizados.
 
-1. Registrar una cuenta nueva con email real, o usar una cuenta pendiente después de la migración.
-2. Login con contraseña incorrecta: 401 sin código de verificación.
-3. Login con contraseña correcta: 403 EMAIL_NOT_VERIFIED (Angular abre el modal).
-4. Solicitar/revisar el código del correo y ponerlo en `verificationCode` en Postman.
-5. Confirmar email: 200. Reutilizar el mismo código: 400.
-6. Login nuevamente: 200 con access y refresh.
+## Pruebas
 
-La pantalla de Angular `/configuracion/verificar-email` todavía es provisional. Este cambio implementa el backend y el disparador real del modal; falta conectar esa pantalla con envío y confirmación de código. No se modificó el frontend en esta tarea.
-
-Las pruebas usan H2 y un EmailService simulado; no tocan Supabase ni envían correos reales. Incluyen registro, login seguro, confirmación pública, vencimiento, cinco intentos, reenvío, aislamiento frente a códigos genéricos y revocación al cambiar email.
+La colección Postman actualizada captura verificationToken del login pendiente y lo envía en los endpoints de verificación. Las pruebas de integración usan H2 y correo simulado; incluyen acceso sin login, permiso manipulado/vencido, rechazo de otros tipos de token, límites de reenvío, conservación del código al recargar o al fallar el proveedor, confirmación con respuesta perdida, intentos reales y reversión si falla crear sesión.
