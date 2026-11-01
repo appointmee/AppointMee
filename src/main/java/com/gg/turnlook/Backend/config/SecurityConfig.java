@@ -77,6 +77,7 @@ public class SecurityConfig {
                                 "/usuarios/inicio-sesion",
                                 "/usuarios/recuperar-cuenta",
                                 "/usuarios/crear",
+                                "/observabilidad/404",
 
                                 "/pagos/webhook",  // prueba rapida fast flash
 
@@ -113,6 +114,16 @@ public class SecurityConfig {
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
+
+        // El reporte 404 es anónimo y no usa cookies ni token. Se acepta desde
+        // el dominio de frontend configurado, incluso si cambia entre entornos.
+        CorsConfiguration observabilidad = new CorsConfiguration();
+        observabilidad.setAllowedOriginPatterns(List.of("*"));
+        observabilidad.setAllowedMethods(List.of("POST", "OPTIONS"));
+        observabilidad.setAllowedHeaders(List.of("Content-Type"));
+        observabilidad.setAllowCredentials(false);
+        source.registerCorsConfiguration("/observabilidad/**", observabilidad);
+
         return source;
     }
 
